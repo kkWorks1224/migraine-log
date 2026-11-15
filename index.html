@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="頭痛ログ" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>頭痛ログ</title>
+    <style>
+      /* 初回描画用の最小 CSS（JS より先に入力欄と全画面スケルトンを出す） */
+      :root { --ink: #1d1d1f; --sk: rgba(120, 120, 128, 0.12); }
+      html, body { margin: 0; background: #fff; color: var(--ink); }
+      body { font: 17px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+      .shell { max-width: 640px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 12px) 16px 0; box-sizing: border-box; }
+      .top { display: flex; align-items: center; justify-content: space-between; height: 52px; }
+      .top h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: 0.01em; }
+      #header-slot { display: flex; gap: 10px; }
+      .composer { position: relative; margin-top: 8px; border-radius: 26px; min-height: 56px; background: rgba(255,255,255,.72); box-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 8px 30px rgba(0,0,0,.06); }
+      .composer textarea { display: block; width: 100%; box-sizing: border-box; border: 0; outline: 0; resize: none; background: transparent; font: inherit; font-size: 17px; color: inherit; padding: 16px 104px 16px 20px; min-height: 56px; max-height: 40vh; field-sizing: content; caret-color: #007aff; }
+      .composer textarea::placeholder { color: rgba(60,60,67,.3); }
+      .sk { background: var(--sk); border-radius: 12px; position: relative; overflow: hidden; }
+      .sk::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.75), transparent); animation: sk 1.3s ease-in-out infinite; }
+      @keyframes sk { to { transform: translateX(100%); } }
+      .sk-btn { width: 40px; height: 40px; border-radius: 50%; }
+      .sk-pressure { height: 176px; border-radius: 26px; margin-top: 14px; }
+      .sk-seg { height: 48px; border-radius: 24px; margin: 16px 0 14px; }
+      .sk-card { height: 84px; border-radius: 22px; margin-bottom: 10px; }
+      body.ready .boot-only { display: none; }
+      @media (prefers-reduced-motion: reduce) { .sk::after { animation: none; } }
+    </style>
+    <script>
+      // JS バンドル読み込み前でも下書きを失わないようにする
+      document.addEventListener("DOMContentLoaded", function () {
+        var t = document.getElementById("memo");
+        try { var d = localStorage.getItem("ml.draft"); if (d && !t.value) t.value = d; } catch (e) {}
+        t.addEventListener("input", function () { try { localStorage.setItem("ml.draft", t.value); } catch (e) {} });
+      });
+    </script>
+  </head>
+  <body>
+    <div class="bg" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="shell">
+      <header class="top">
+        <h1>頭痛ログ</h1>
+        <div id="header-slot"><div class="sk sk-btn boot-only"></div><div class="sk sk-btn boot-only"></div></div>
+      </header>
+      <form class="composer glass" id="composer">
+        <textarea id="memo" name="memo" rows="1" placeholder="メモ" autofocus autocomplete="off" enterkeyhint="done" aria-label="メモ"></textarea>
+        <div id="composer-actions"></div>
+        <div id="composer-tools"></div>
+      </form>
+      <main id="root">
+        <div class="boot" aria-busy="true" aria-label="読み込み中">
+          <div class="sk sk-pressure"></div>
+          <div class="sk sk-seg"></div>
+          <div class="sk sk-card"></div>
+          <div class="sk sk-card" style="opacity:.85"></div>
+          <div class="sk sk-card" style="opacity:.7"></div>
+          <div class="sk sk-card" style="opacity:.55"></div>
+          <div class="sk sk-card" style="opacity:.4"></div>
+          <div class="sk sk-card" style="opacity:.25"></div>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
