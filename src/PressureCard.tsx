@@ -6,7 +6,7 @@ import { fmtTime, signed } from "./format";
 import { haptic } from "./haptics";
 
 const W = 320;
-const H = 84;
+const H = 100;
 const PAD = 6;
 
 export function PressureCard() {
@@ -32,6 +32,15 @@ export function PressureCard() {
   const now = Date.now();
   const cur = useMemo(() => (s ? snapshotAt(s, now) : null), [s, Math.floor(now / 6e5)]);
   const drop = useMemo(() => (s ? nextDrop(s, now) : null), [s, Math.floor(now / 6e5)]);
+  const trend = trendOf(cur?.d3h ?? null, cur?.d24h ?? null);
+
+  // 画面上部の空の色を気圧の傾向に合わせる
+  useEffect(() => {
+    const key = cur ? trend.key : "none";
+    document.documentElement.dataset.sky = key;
+    const top = { steady: "#d9e9ff", falling: "#ffe1bf", steep: "#ffc9a8", rising: "#d6f3f6", none: "#eef0f4" }[key];
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", top);
+  }, [cur ? trend.key : "none"]);
 
   let body;
   if (s && cur) {
@@ -48,6 +57,11 @@ export function PressureCard() {
               <Count value={cur.pressure} />
               <small>hPa</small>
             </span>
+            {cur.d3h != null && (
+              <span className={`pc-trend ${trend.key}`} data-testid="trend">
+                {trend.label}
+              </span>
+            )}
           </div>
           <div className="pc-side">
             <span className="pc-sky" title={SKY_LABEL[kind]}>
@@ -123,6 +137,17 @@ export function PressureCard() {
       </AnimatePresence>
     </section>
   );
+}
+
+type TrendKey = "steady" | "falling" | "steep" | "rising";
+function trendOf(d3h: number | null, d24h: number | null): { key: TrendKey; label: string } {
+  if (d3h == null) return { key: "steady", label: "" };
+  if (d3h <= -2.5) return { key: "steep", label: "急に下がっています" };
+  if (d3h <= -1.5) return { key: "falling", label: "下がっています" };
+  if (d24h != null && d24h <= -5) return { key: "falling", label: "この1日で大きく下がりました" };
+  if (d3h >= 1.5) return { key: "rising", label: "上がっています" };
+  if (d24h != null && d24h >= 5) return { key: "rising", label: "この1日で大きく上がりました" };
+  return { key: "steady", label: "安定しています" };
 }
 
 function Delta({ label, v, warn, testid }: { label: string; v: number; warn: number; testid?: string }) {

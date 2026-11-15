@@ -16,6 +16,13 @@ import { haptic } from "./haptics";
 
 type Toast = { id: number; text: string; undo?: () => void };
 
+// 空のタブには、そのタブにカードが来る操作を出す
+const EMPTY_HINT: Record<Status, string> = {
+  pain: "頭が痛くなったら、上の欄に書いて記録",
+  easing: "薬が効いてきたら、「痛い」のカードを右へフリック",
+  gone: "痛みが消えたら、カードを右へフリックか丸ボタン",
+};
+
 export function App() {
   useBootSync();
   const s = useStore();
@@ -208,6 +215,7 @@ export function App() {
                       animate={{ opacity: 1, scale: 1, transition: { delay: 0.15 } }}
                     >
                       <span className={`empty-dot ${tab}`} />
+                      <p>{EMPTY_HINT[tab]}</p>
                     </motion.li>
                   )}
                 </motion.ul>

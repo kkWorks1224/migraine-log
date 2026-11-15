@@ -19,8 +19,22 @@
   --glass-shadow: 0 0.5px 0 rgba(255, 255, 255, 0.9) inset, 0 -0.5px 0 rgba(0, 0, 0, 0.04) inset,
     0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 6px 24px rgba(15, 23, 42, 0.07), 0 1px 3px rgba(15, 23, 42, 0.05);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --round: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+  /* 空の色：気圧の動きで変わる（安定＝澄んだ青、低下＝琥珀、上昇＝薄い水色） */
+  --sky-a: #d9e9ff;
+  --sky-b: #eef0ff;
+  --sky-glow: rgba(120, 170, 255, 0.35);
   color-scheme: light;
 }
+@property --sky-a { syntax: "<color>"; inherits: true; initial-value: #d9e9ff; }
+@property --sky-b { syntax: "<color>"; inherits: true; initial-value: #eef0ff; }
+@property --sky-glow { syntax: "<color>"; inherits: true; initial-value: rgba(120, 170, 255, 0.35); }
+html[data-sky="falling"] { --sky-a: #ffe1bf; --sky-b: #ffeef0; --sky-glow: rgba(255, 160, 80, 0.38); }
+html[data-sky="steep"] { --sky-a: #ffc9a8; --sky-b: #ffe2e6; --sky-glow: rgba(255, 110, 70, 0.4); }
+html[data-sky="rising"] { --sky-a: #d6f3f6; --sky-b: #e8f1ff; --sky-glow: rgba(90, 200, 230, 0.32); }
+html[data-sky="none"] { --sky-a: #eef0f4; --sky-b: #f6f6f9; --sky-glow: rgba(180, 190, 210, 0.3); }
 
 * { -webkit-tap-highlight-color: transparent; }
 html { overscroll-behavior-y: none; }
@@ -31,16 +45,18 @@ button:disabled { cursor: default; opacity: 0.4; }
 button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue) 45%, transparent); outline-offset: 2px; }
 input, textarea { font: inherit; color: inherit; }
 
-/* 背景：白を基調に、ガラスの屈折が感じられるごく淡い光だまり */
-.bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #fff; pointer-events: none; }
-.bg i { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.55; animation: drift 22s ease-in-out infinite alternate; }
-.bg i:nth-child(1) { width: 60vmax; height: 60vmax; left: -25vmax; top: -20vmax; background: radial-gradient(circle, #dbeafe, transparent 65%); }
-.bg i:nth-child(2) { width: 55vmax; height: 55vmax; right: -25vmax; top: 15vh; background: radial-gradient(circle, #ede4fb, transparent 65%); animation-duration: 28s; animation-delay: -6s; }
-.bg i:nth-child(3) { width: 50vmax; height: 50vmax; left: 10vw; bottom: -30vmax; background: radial-gradient(circle, #dff5f7, transparent 65%); animation-duration: 32s; animation-delay: -12s; }
-@keyframes drift {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(6vmax, 4vmax, 0) scale(1.12); }
+/* 背景：白地の上部に「今の空」。気圧の傾向で色がゆっくり移る（このアプリで唯一の大きな演出） */
+.bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #fff; pointer-events: none; transition: --sky-a 1.6s ease, --sky-b 1.6s ease, --sky-glow 1.6s ease; }
+.bg::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: min(78vh, 640px);
+  background:
+    radial-gradient(120% 70% at 85% 0%, var(--sky-glow), transparent 60%),
+    linear-gradient(180deg, var(--sky-a) 0%, var(--sky-b) 45%, #fff 100%);
 }
+.bg i { display: none; }
 
 /* ガラス素材：半透明 + ぼかし + 彩度 + 縁のスペキュラハイライト */
 .glass {
@@ -155,15 +171,18 @@ input, textarea { font: inherit; color: inherit; }
 .int-label { position: relative; }
 
 /* 気圧カード */
-.pressure { margin-top: 14px; border-radius: 26px; padding: 16px 16px 10px; background: rgba(255, 255, 255, 0.62); min-height: 64px; box-sizing: border-box; }
+.pressure { margin-top: 14px; border-radius: 30px; padding: 18px 18px 10px; background: rgba(255, 255, 255, 0.5); min-height: 64px; box-sizing: border-box; }
 .pc-top { display: flex; justify-content: space-between; align-items: flex-start; }
 .pc-now { display: flex; flex-direction: column; }
 .pc-label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink2); font-weight: 500; }
-.pc-value { font-size: 34px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.15; }
-.pc-value small { font-size: 15px; font-weight: 600; color: var(--ink2); margin-left: 4px; }
+.pc-value { font-family: var(--round); font-size: 58px; font-weight: 600; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; line-height: 1; margin-top: 6px; }
+.pc-value small { font-family: var(--round); font-size: 17px; font-weight: 600; color: var(--ink2); margin-left: 6px; letter-spacing: 0; }
+.pc-trend { margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--ink); }
+.pc-trend.falling, .pc-trend.steep { color: #c25e00; }
+.pc-trend.rising { color: #1d8299; }
 .pc-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .pc-sky { display: inline-flex; align-items: center; gap: 4px; }
-.pc-sky b { font-size: 20px; font-weight: 600; }
+.pc-sky b { font-family: var(--round); font-size: 22px; font-weight: 600; }
 .pc-hum { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; color: var(--ink2); }
 .pc-hum svg { color: #5ac8fa; }
 .pc-deltas { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -205,12 +224,11 @@ input, textarea { font: inherit; color: inherit; }
 .underlay span { display: inline-flex; align-items: center; gap: 8px; }
 .underlay .pulse { animation: pop 0.32s var(--ease); }
 @keyframes pop { 40% { transform: scale(1.25); } }
-.card { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px 14px 14px; box-sizing: border-box; border-radius: 22px; background: rgba(255, 255, 255, 0.8); cursor: grab; user-select: none; -webkit-user-select: none; will-change: transform; overflow: hidden; }
-.card::after { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--c); opacity: 0.9; }
+.card { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px 16px 16px; box-sizing: border-box; border-radius: 24px; background: rgba(255, 255, 255, 0.82); cursor: grab; user-select: none; -webkit-user-select: none; will-change: transform; overflow: hidden; }
 .card:active { cursor: grabbing; }
-.card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 .card-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.when { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.when { font-family: var(--round); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .when-day { font-weight: 500; color: var(--ink2); margin-right: 6px; font-size: 15px; }
 .elapsed { font-size: 13px; color: var(--ink2); font-variant-numeric: tabular-nums; }
 .int-tag { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink2); }
@@ -239,8 +257,9 @@ input, textarea { font: inherit; color: inherit; }
 .check-mark { position: relative; }
 .easing-dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: conic-gradient(var(--orange) 0 50%, transparent 50%); }
 
-.empty { list-style: none; display: grid; place-items: center; height: 160px; }
-.empty-dot { width: 10px; height: 10px; border-radius: 50%; opacity: 0.35; animation: breathe 2.4s ease-in-out infinite; }
+.empty { list-style: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 160px; padding: 0 24px; text-align: center; }
+.empty p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink2); max-width: 22em; text-wrap: balance; word-break: auto-phrase; }
+.empty-dot { width: 10px; height: 10px; border-radius: 50%; opacity: 0.45; }
 .empty-dot.pain { background: var(--red); }
 .empty-dot.easing { background: var(--orange); }
 .empty-dot.gone { background: var(--green); }
@@ -360,9 +379,20 @@ input, textarea { font: inherit; color: inherit; }
 .insight-sk { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; }
 .ai-btn { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 16px; background: rgba(175, 82, 222, 0.1); color: var(--purple); font-weight: 600; font-size: 16px; }
 
+/* 数字は丸みのある書体で統一（気圧・時刻・集計） */
+.kpi strong, .wx-main strong, .cal-day, .bar-row b, .count, .delta b, .elapsed { font-family: var(--round); }
+
+/* 押した感触：押せるものはすべてわずかに縮む */
+.tool, .chip, .row-btn, .seg-item, .eff, .int-btn, .round-btn, .ai-btn, .pc-ask, .toast-undo, .day-item, .switch-row {
+  transition-property: transform, background, color, box-shadow;
+  transition-duration: 160ms, 250ms, 250ms, 250ms;
+  transition-timing-function: var(--ease-out);
+}
+.tool:active, .chip:active, .row-btn:active, .seg-item:active, .eff:active, .int-btn:active, .round-btn:active, .ai-btn:active, .toast-undo:active, .day-item:active, .switch-row:active { transform: scale(0.96); }
+
 @media (min-width: 700px) {
   .shell { padding-top: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bg i, .composer.thinking::after, .empty-dot, .pain-ring, .pc-pulse, .icon-btn.send.nudge { animation: none; }
+  .bg, .composer.thinking::after, .empty-dot, .pain-ring, .pc-pulse, .icon-btn.send.nudge { animation: none; transition: none; }
 }

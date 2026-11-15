@@ -1,5 +1,5 @@
 // アプリシェルをキャッシュして「開いた瞬間」に表示する（API は常にネットワーク）
-const CACHE = "ml-shell-v1";
+const CACHE = "ml-shell-v2";
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/"])).then(() => self.skipWaiting()));
 });
