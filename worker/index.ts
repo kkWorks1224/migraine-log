@@ -8,7 +8,6 @@ type Env = {
   AI: Ai;
   ASSETS: Fetcher;
   GOOGLE_CLIENT_ID: string;
-  GOOGLE_CLIENT_SECRET: string;
   AI_MODEL: string;
   DEV_LOGIN?: string;
   AI_LIMITER?: RateLimit;
@@ -24,14 +23,12 @@ const UA = "migraine-log/1.0 (+https://github.com/kkWorks1224/migraine-log)";
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
-app.use(
-  "*",
-  secureHeaders({
+const baseHeaders = secureHeaders({
     contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
     strictTransportSecurity: "max-age=31536000; includeSubDomains",
     referrerPolicy: "strict-origin-when-cross-origin",
-  }),
-);
+});
+app.use("*", (c, next) => (c.req.path === "/auth/callback" ? next() : baseHeaders(c, next)));
 
 app.onError((err, c) => {
   if (err instanceof SyntaxError) return c.json({ error: "bad_request" }, 400);
@@ -87,12 +84,43 @@ async function currentUser(c: any): Promise<User | null> {
   return row ?? null;
 }
 
-// ---------- auth（Google OAuth 2.0 Authorization Code + PKCE） ----------
+// ---------- auth（Google OpenID Connect：ID トークンを Google の公開鍵で検証。クライアントシークレット不要） ----------
+type Jwk = JsonWebKey & { kid: string };
+let jwksCache: { at: number; keys: Jwk[] } | null = null;
+async function googleKeys(force = false): Promise<Jwk[]> {
+  if (!force && jwksCache && Date.now() - jwksCache.at < 3600e3) return jwksCache.keys;
+  const r = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  const { keys } = (await r.json()) as { keys: Jwk[] };
+  jwksCache = { at: Date.now(), keys };
+  return keys;
+}
+const b64urlDecode = (s: string) =>
+  Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(s.length / 4) * 4, "=")), (ch) =>
+    ch.charCodeAt(0),
+  );
+
+async function verifyIdToken(token: string, clientId: string, nonce: string) {
+  const [h, p, sig] = token.split(".");
+  if (!h || !p || !sig) return null;
+  const header = JSON.parse(new TextDecoder().decode(b64urlDecode(h)));
+  if (header.alg !== "RS256") return null;
+  let jwk = (await googleKeys()).find((k) => k.kid === header.kid);
+  if (!jwk) jwk = (await googleKeys(true)).find((k) => k.kid === header.kid);
+  if (!jwk) return null;
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64urlDecode(sig), new TextEncoder().encode(`${h}.${p}`));
+  if (!ok) return null;
+  const c = JSON.parse(new TextDecoder().decode(b64urlDecode(p)));
+  const validIss = ["https://accounts.google.com", "accounts.google.com"].includes(c.iss);
+  if (!validIss || c.aud !== clientId || c.exp * 1000 < Date.now() || c.nonce !== nonce) return null;
+  return c as { sub: string; email?: string; name?: string; picture?: string };
+}
+
 app.get("/auth/login", async (c) => {
   if (!c.env.GOOGLE_CLIENT_ID) return c.text("Google OAuth is not configured", 503);
   const state = randomToken(16);
-  const verifier = randomToken(48);
-  setCookie(c, "oauth", `${state}.${verifier}`, {
+  const nonce = randomToken(16);
+  setCookie(c, "oauth", `${state}.${nonce}`, {
     httpOnly: true,
     secure: isSecure(c.req.url),
     sameSite: "Lax",
@@ -102,53 +130,41 @@ app.get("/auth/login", async (c) => {
   const q = new URLSearchParams({
     client_id: c.env.GOOGLE_CLIENT_ID,
     redirect_uri: new URL("/auth/callback", c.req.url).toString(),
-    response_type: "code",
+    response_type: "id_token",
+    response_mode: "fragment",
     scope: "openid email profile",
     state,
-    code_challenge: await sha256(verifier),
-    code_challenge_method: "S256",
+    nonce,
     prompt: "select_account",
   });
   return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`);
 });
 
-app.get("/auth/callback", async (c) => {
-  const [state, verifier] = (getCookie(c, "oauth") ?? "").split(".");
+// ID トークンは URL フラグメントで返る（サーバに届かない）ので、小さなページで受け取り /auth/complete へ送る
+app.get("/auth/callback", (c) =>
+  c.html(
+    '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>ログイン中</title><script src="/callback.js"></script>',
+    200,
+    {
+      "content-security-policy": "default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer",
+      "cache-control": "no-store",
+    },
+  ),
+);
+
+app.post("/auth/complete", async (c) => {
+  const [state, nonce] = (getCookie(c, "oauth") ?? "").split(".");
   deleteCookie(c, "oauth", { path: "/auth" });
-  const code = c.req.query("code");
-  if (!code || !state || state !== c.req.query("state")) {
-    console.error("oauth state mismatch", { hasCode: !!code, hasCookie: !!state, err: c.req.query("error") });
-    return c.redirect("/?auth=error");
+  const body = await c.req.json<{ id_token?: string; state?: string }>();
+  if (!state || !nonce || body.state !== state || typeof body.id_token !== "string") {
+    console.error("oauth state mismatch", { hasCookie: !!state });
+    return c.json({ error: "bad_state" }, 400);
   }
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: c.env.GOOGLE_CLIENT_ID,
-      client_secret: c.env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: new URL("/auth/callback", c.req.url).toString(),
-      grant_type: "authorization_code",
-      code_verifier: verifier,
-    }),
-  });
-  if (!res.ok) {
-    console.error("token exchange failed", res.status, await res.text());
-    return c.redirect("/?auth=error");
-  }
-  const { id_token } = (await res.json()) as { id_token: string };
-  // id_token は Google のトークンエンドポイントから TLS で直接受け取ったものなので、クレームのみ検証する
-  const claims = JSON.parse(
-    new TextDecoder().decode(
-      Uint8Array.from(atob(id_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")), (ch) =>
-        ch.charCodeAt(0),
-      ),
-    ),
-  );
-  const validIss = ["https://accounts.google.com", "accounts.google.com"].includes(claims.iss);
-  if (!validIss || claims.aud !== c.env.GOOGLE_CLIENT_ID || claims.exp * 1000 < Date.now()) {
-    console.error("id_token claims invalid");
-    return c.redirect("/?auth=error");
+  const claims = await verifyIdToken(body.id_token, c.env.GOOGLE_CLIENT_ID, nonce);
+  if (!claims) {
+    console.error("id_token invalid");
+    return c.json({ error: "invalid_token" }, 400);
   }
   await createSession(c, {
     id: `g:${claims.sub}`,
@@ -156,7 +172,7 @@ app.get("/auth/callback", async (c) => {
     name: claims.name ?? "",
     picture: claims.picture ?? "",
   });
-  return c.redirect("/");
+  return c.json({ ok: true });
 });
 
 // ローカル開発専用（.dev.vars で DEV_LOGIN=1 かつ localhost のときのみ）
@@ -436,16 +452,18 @@ app.post("/api/ai/parse", async (c) => {
 
   const system = [
     "あなたは頭痛ダイアリーの入力アシスタントです。",
-    "ユーザーのメモは音声入力のため誤字・脱字・誤変換を含むことがあります（例：「ロキソニン」が「六その人」、「寝不足」が「ねぶそく」）。意図を汲んで読み取ってください。",
+    "ユーザーのメモは音声入力のため誤字・脱字・誤変換を含むことがあります（例：「六その人」→ロキソニン、「ねぶそく」→寝不足、「いぶ」→イブ、「はきけ」→吐き気、「ずきずき」→ズキズキ）。頭痛の記録であることを前提に意図を汲んでください。",
+    "誤変換を直すときは頭痛・体調・薬に関係する語にだけ直し、無関係な語（例：発毛）に変えないこと。確信が持てない語は元のまま残す。",
     `現在日時は ${now || "不明"}（ユーザーの現地時刻）です。`,
     "次のキーを持つ JSON のみを出力してください:",
     '{"memo": 誤変換を直した元メモ（要約しない）,',
-    ' "intensity": 頭痛の強さ 0=記載なし 1=軽い 2=中くらい・支障あり 3=強い・寝込む,',
+    ' "intensity": 頭痛の強さ。強さを表す言葉（軽い・少し・中くらい・つらい・ひどい・寝込む 等）が無ければ 0。1=軽い 2=中くらい・支障あり 3=強い・寝込む,',
     ' "meds": 飲んだ薬の名前の配列（一般的な表記に直す。例: ロキソニン, イブ, カロナール, イミグラン, マクサルト, レルパックス, アマージ, ゾーミッグ）,',
+    ' "medEffect": 薬の効き目の記載があれば "good"=効いた / "some"=少し効いた・あまり効かない / "none"=全く効かない、無ければ null,',
     ' "sleepLack": 寝不足・睡眠不足の記載があれば true,',
     ` "triggers": きっかけの配列。次から選ぶ: ${TRIGGERS.join("、")},`,
     ` "symptoms": 症状の配列。次から選ぶ: ${SYMPTOMS.join("、")},`,
-    ' "time": 頭痛が始まった時刻の記載があれば "YYYY-MM-DDTHH:MM"（「今朝7時」「昨夜」などは現在日時から計算）、無ければ null,',
+    ' "time": 頭痛が始まった時刻の記載があれば "YYYY-MM-DDTHH:MM"（現在日時から計算。時刻が曖昧なら 今朝=07:00、昼=12:00、夕方=17:00、夜=21:00、昨夜=前日の22:00、夜中・明け方=03:00 を目安にする）、無ければ null,',
     ' "status": "pain"=今痛い / "easing"=和らいできた / "gone"=治まった（記載が無ければ "pain"）}',
     "メモに書かれていないことは推測で追加しないこと。",
   ].join("\n");
@@ -459,6 +477,7 @@ app.post("/api/ai/parse", async (c) => {
       memo: typeof p.memo === "string" && p.memo.trim() ? p.memo.trim().slice(0, 4000) : input,
       intensity: [0, 1, 2, 3].includes(p.intensity) ? p.intensity : 0,
       meds: strList(p.meds, 10),
+      medEffect: ["good", "some", "none"].includes(p.medEffect) ? p.medEffect : null,
       sleepLack: p.sleepLack === true,
       triggers: strList(p.triggers).filter((s) => TRIGGERS.includes(s)),
       symptoms: strList(p.symptoms).filter((s) => SYMPTOMS.includes(s)),

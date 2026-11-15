@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import type { Entry, Status } from "./types";
+import type { Entry, MedEffect, Status } from "./types";
 
 export type User = { id: string; email: string; name: string; picture: string };
 export type SyncState = "idle" | "syncing" | "offline" | "error";
@@ -187,6 +187,7 @@ export type Parsed = {
   memo: string;
   intensity: 0 | 1 | 2 | 3;
   meds: string[];
+  medEffect: MedEffect | null;
   sleepLack: boolean;
   triggers: string[];
   symptoms: string[];

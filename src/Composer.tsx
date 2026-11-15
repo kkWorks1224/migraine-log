@@ -160,6 +160,7 @@ export function Composer({
         {
           intensity: p.intensity || prev.intensity,
           meds: [...new Set([...prev.meds, ...p.meds])],
+          medEffect: p.medEffect ?? prev.medEffect,
           sleepLack: prev.sleepLack || p.sleepLack,
           triggers: [...new Set([...prev.triggers, ...p.triggers])],
           symptoms: [...new Set([...prev.symptoms, ...p.symptoms])],

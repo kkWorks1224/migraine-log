@@ -68,7 +68,7 @@ public/sw.js        アプリシェルのキャッシュ（2 回目以降はネ�
 | **Cache API** | 気象データを位置×時間単位で 1 時間キャッシュし、外部 API 呼び出しを最小化 |
 | **位置の丸め（小数 2 桁 ≒ 1km）** | 外部 API に渡す位置情報を必要最小限にする |
 | **Hono** | Workers 向けの軽量ルーター。Cookie・セキュリティヘッダー等のヘルパーが揃い依存が小さい |
-| **Google OAuth（自前実装・PKCE）** | Google のみなので認証ライブラリや外部 IdP サービスは不要。Authorization Code + PKCE、セッションは D1 にハッシュ保存した HttpOnly Cookie |
+| **Google OpenID Connect（自前実装・ID トークン方式）** | Google のみなので認証ライブラリや外部 IdP サービスは不要。ID トークンを Google の公開鍵（JWKS）で署名検証するため**クライアントシークレットを保管しなくてよい**（漏えいリスクとローテーション作業がない）。state・nonce で CSRF／リプレイを防止し、セッションは D1 にハッシュ保存した HttpOnly Cookie |
 | **React 19 + Vite + @cloudflare/vite-plugin** | `vite dev` 1 つで UI と Worker（workerd）を同時に動かせ、本番と同じランタイムで検証できる |
 | **Motion（旧 Framer Motion）** | スプリング物理・ドラッグ・レイアウト／exit アニメーション・SVG の線描画が揃い、iOS らしい慣性のある操作感を少ないコードで実現 |
 | **素の CSS（backdrop-filter）** | Liquid Glass の半透明・ぼかし・彩度・縁のハイライトを細かく調整するため UI ライブラリは使わない。色は Apple のシステムカラー、タップ領域は HIG の 44pt 以上 |
@@ -87,19 +87,13 @@ npm run dev            # http://localhost:5174 （/auth/dev で開発用ログ�
 npm run deploy
 ```
 
-`.dev.vars`（git 管理外）:
+`.dev.vars`（git 管理外）: `DEV_LOGIN=1`
 
-```
-DEV_LOGIN=1
-GOOGLE_CLIENT_SECRET=...
-```
-
-本番シークレット: `npx wrangler secret put GOOGLE_CLIENT_SECRET`。
-Google OAuth クライアントの承認済みリダイレクト URI に `https://<host>/auth/callback` を登録する。
+シークレットは不要。Google OAuth クライアント（`wrangler.jsonc` の `GOOGLE_CLIENT_ID`）の承認済みリダイレクト URI に `https://<host>/auth/callback` を登録する。
 
 ## セキュリティ
 
-- 認証: Google OAuth（Authorization Code + PKCE、state 検証）。セッショントークンは SHA-256 ハッシュのみ D1 に保存、Cookie は HttpOnly / Secure / SameSite=Lax
+- 認証: Google OpenID Connect（ID トークンを JWKS で RS256 署名検証、iss・aud・exp・nonce・state を検証）。セッショントークンは SHA-256 ハッシュのみ D1 に保存、Cookie は HttpOnly / Secure / SameSite=Lax
 - 認可: 記録の主キーは `(user_id, id)` で、他ユーザーの行は読み書き不可。受信データはサーバ側で検証・正規化（未知のキーは破棄）
 - ヘッダー: CSP（インラインスクリプトはハッシュ許可のみ）、frame-ancestors 'none'、HSTS、nosniff、Permissions-Policy で位置情報は自オリジンのみ
 - `/auth/dev` は `DEV_LOGIN=1` かつ localhost のときのみ有効
