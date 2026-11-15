@@ -4,7 +4,8 @@ import { actions, getState } from "./store";
 import { rateAt } from "./forecast";
 
 export type Hourly = { t: number[]; p: (number | null)[]; temp: (number | null)[]; rh: (number | null)[]; code: (number | null)[] };
-export type Series = { lat: number; lon: number; place: string | null; fetchedAt: number; past: number; hourly: Hourly };
+export type Daily = { t: number[]; code: (number | null)[]; tmax: (number | null)[]; tmin: (number | null)[]; pop: (number | null)[] };
+export type Series = { lat: number; lon: number; place: string | null; fetchedAt: number; past: number; hourly: Hourly; daily?: Daily | null };
 export type Geo = "unknown" | "prompt" | "granted" | "denied" | "unsupported";
 
 type WState = { geo: Geo; loading: boolean; error: boolean; series: Series | null };
@@ -95,13 +96,14 @@ export function loadSeries({ force = false, past = 92 } = {}): Promise<Series | 
     try {
       const pos = await position();
       const s = state.series;
-      if (!force && s && near(s, pos) && Date.now() - s.fetchedAt < 30 * 6e4 && s.past >= past) {
+      // daily が未定義の古いキャッシュ（週間予報追加前）は取り直す
+      if (!force && s && near(s, pos) && Date.now() - s.fetchedAt < 30 * 6e4 && s.past >= past && s.daily !== undefined) {
         set({ loading: false });
         return s;
       }
       const res = await fetch(`/api/weather?lat=${pos.lat.toFixed(2)}&lon=${pos.lon.toFixed(2)}&past=${past}`);
       if (!res.ok) throw new Error(String(res.status));
-      const j = (await res.json()) as { lat: number; lon: number; place: string | null; hourly: Hourly };
+      const j = (await res.json()) as { lat: number; lon: number; place: string | null; hourly: Hourly; daily: Daily | null };
       const series: Series = { ...j, fetchedAt: Date.now(), past };
       set({ series, loading: false });
       return series;

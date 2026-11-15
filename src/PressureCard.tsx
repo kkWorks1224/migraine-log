@@ -15,6 +15,7 @@ const PAD = 6;
 export function PressureCard({ entries }: { entries: Entry[] }) {
   const ws = useWeather();
   const fc = useForecast(entries);
+  const [range, setRange] = useState<"2d" | "week">("2d");
 
   useEffect(() => {
     checkPermission();
@@ -82,9 +83,31 @@ export function PressureCard({ entries }: { entries: Entry[] }) {
         <div className="pc-deltas">
           {cur.trend != null && <Delta label="6時間" v={cur.trend} warn={-2} testid="d6h" />}
           {cur.d24h != null && <Delta label="24時間" v={cur.d24h} warn={-5} />}
+          {s.daily && s.daily.t.length > 2 && (
+            <div className="range" role="tablist" aria-label="グラフの期間">
+              {(["2d", "week"] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  role="tab"
+                  aria-selected={range === r}
+                  className={range === r ? "on" : ""}
+                  data-testid={`range-${r}`}
+                  onClick={() => {
+                    haptic("light");
+                    setRange(r);
+                  }}
+                >
+                  {range === r && <motion.span layoutId="range-pill" className="range-pill" transition={{ type: "spring", stiffness: 520, damping: 38 }} />}
+                  <span>{r === "2d" ? "2日" : "1週間"}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <Chart s={s} now={now} threshold={fc?.analysis.threshold ?? GENERAL_THRESHOLD} />
+        <Chart s={s} now={now} threshold={fc?.analysis.threshold ?? GENERAL_THRESHOLD} range={range} />
         {fc && <ForecastRow fc={fc} />}
+        {s.daily && s.daily.t.length > 2 && <WeekStrip s={s} threshold={fc?.analysis.threshold ?? GENERAL_THRESHOLD} />}
       </motion.div>
     );
   } else if (ws.geo === "denied" || ws.geo === "unsupported") {
@@ -221,17 +244,18 @@ function Count({ value }: { value: number }) {
 }
 
 // 過去 24 時間〜24 時間後の気圧。急な低下（3 時間で 1.5hPa 以上）の区間を強調する
-function Chart({ s, now, threshold }: { s: Series; now: number; threshold: number }) {
+function Chart({ s, now, threshold, range }: { s: Series; now: number; threshold: number; range: "2d" | "week" }) {
   const g = useMemo(() => {
     const h = s.hourly;
+    const t0 = now - 24 * 36e5;
+    const last = h.t[h.t.length - 1] ?? now;
+    const t1 = range === "week" ? Math.min(last, now + 7 * 864e5) : now + 24 * 36e5;
     const pts: { t: number; p: number }[] = [];
     h.t.forEach((t, i) => {
       const p = h.p[i];
-      if (p != null && t >= now - 24 * 36e5 && t <= now + 24 * 36e5) pts.push({ t, p });
+      if (p != null && t >= t0 && t <= t1) pts.push({ t, p });
     });
     if (pts.length < 4) return null;
-    const t0 = now - 24 * 36e5;
-    const t1 = now + 24 * 36e5;
     const ps = pts.map((x) => x.p);
     const lo = Math.min(...ps) - 1.5;
     const hi = Math.max(...ps) + 1.5;
@@ -247,12 +271,25 @@ function Chart({ s, now, threshold }: { s: Series; now: number; threshold: numbe
       .map((seg) => smooth(seg));
     let nowP = pts[0].p;
     for (const x of pts) if (x.t <= now) nowP = x.p;
-    return { line, area, drops, nx: X(now), ny: Y(nowP), lo, hi };
-  }, [s, threshold, Math.floor(now / 6e5)]);
+    // 1 週間表示では日付の区切りと曜日を出す
+    // 線は日付の境目、曜日は各日の正午に置く（「今」と重なるものは出さない）
+    const days: { x: number; lx: number | null; label: string }[] = [];
+    if (range === "week") {
+      const d = new Date(now);
+      for (let k = 1; k <= 7; k++) {
+        const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() + k).getTime();
+        if (start > t1) break;
+        const noon = start + 12 * 36e5;
+        const lx = noon <= t1 && Math.abs(X(noon) - X(now)) > 14 ? X(noon) : null;
+        days.push({ x: X(start), lx, label: "日月火水木金土"[new Date(start).getDay()] });
+      }
+    }
+    return { line, area, drops, nx: X(now), ny: Y(nowP), lo, hi, days };
+  }, [s, threshold, range, Math.floor(now / 6e5)]);
 
   if (!g) return null;
   return (
-    <svg className="pc-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="気圧の推移">
+    <svg className="pc-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={range === "week" ? "気圧の推移（1週間）" : "気圧の推移"} key={range}>
       <defs>
         <linearGradient id="pcfill" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0" stopColor="#007aff" stopOpacity=".22" />
@@ -312,20 +349,90 @@ function Chart({ s, now, threshold }: { s: Series; now: number; threshold: numbe
         />
       ))}
       <line x1={g.nx} x2={g.nx} y1={PAD} y2={H - 14} stroke="rgba(60,60,67,.25)" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
-      <text x={PAD} y={H - 2} className="pc-axis">
-        24時間前
-      </text>
+      {g.days.map((d) => (
+        <g key={d.x}>
+          <line x1={d.x} x2={d.x} y1={PAD} y2={H - 14} stroke="rgba(60,60,67,.1)" vectorEffect="non-scaling-stroke" />
+          {d.lx != null && (
+            <text x={d.lx} y={H - 2} className="pc-axis" textAnchor="middle">
+              {d.label}
+            </text>
+          )}
+        </g>
+      ))}
+      {range === "2d" && (
+        <text x={PAD} y={H - 2} className="pc-axis">
+          24時間前
+        </text>
+      )}
       <text x={g.nx} y={H - 2} className="pc-axis" textAnchor="middle">
         今
       </text>
-      <text x={W - PAD} y={H - 2} className="pc-axis" textAnchor="end">
-        24時間後
-      </text>
+      {range === "2d" && (
+        <text x={W - PAD} y={H - 2} className="pc-axis" textAnchor="end">
+          24時間後
+        </text>
+      )}
       <circle cx={g.nx} cy={g.ny} r="7" className="pc-pulse" />
       <circle cx={g.nx} cy={g.ny} r="3.6" fill="#007aff" stroke="#fff" strokeWidth="1.6" />
     </svg>
   );
 }
+
+// 週間予報：天気・最高/最低気温・降水確率と、その日の気圧の注意
+function WeekStrip({ s, threshold }: { s: Series; threshold: number }) {
+  const days = useMemo(() => {
+    const d = s.daily!;
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    return d.t
+      .map((t, i) => ({ t, code: d.code[i], tmax: d.tmax[i], tmin: d.tmin[i], pop: d.pop[i] }))
+      .filter((x) => x.t >= start - 36e5)
+      .slice(0, 7)
+      .map((x) => {
+        const evs = findDrops(s.hourly, Math.max(x.t, Date.now()), x.t + 864e5, threshold);
+        const peak = evs.length ? Math.min(...evs.map((e) => e.peak)) : null;
+        const level = peak == null ? null : peak <= threshold * 1.6 ? "high" : "mid";
+        return { ...x, peak, level };
+      });
+  }, [s, threshold]);
+  const today = dayKeyLocal(Date.now());
+  return (
+    <div className="week" data-testid="week">
+      <div className="week-scroll">
+        {days.map((d, i) => {
+          const dt = new Date(d.t);
+          const isToday = dayKeyLocal(d.t) === today;
+          return (
+            <motion.div
+              key={d.t}
+              className={`wk ${d.level ?? ""}`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 + i * 0.03, duration: 0.28, ease: [0.23, 1, 0.32, 1] }}
+              data-testid="week-day"
+              title={d.peak != null ? `気圧の低下 6時間で ${signed(d.peak)}hPa` : undefined}
+            >
+              <span className={`wk-day ${dt.getDay() === 0 ? "sun" : dt.getDay() === 6 ? "sat" : ""}`}>{isToday ? "今日" : "日月火水木金土"[dt.getDay()]}</span>
+              <Sky kind={sky(d.code)} width={26} height={26} />
+              <span className="wk-t">
+                <b>{d.tmax != null ? Math.round(d.tmax) : "–"}°</b>
+                <small>{d.tmin != null ? Math.round(d.tmin) : "–"}°</small>
+              </span>
+              <span className="wk-pop">{d.pop != null ? `${d.pop}%` : ""}</span>
+              <span className="wk-alert">{d.level ? (d.level === "high" ? "注意 高" : "注意") : ""}</span>
+            </motion.div>
+          );
+        })}
+      </div>
+      <p className="wk-note">「注意」は気圧が頭痛に注意が必要な下がり方をする日。3日先以降は予報の精度が下がります</p>
+    </div>
+  );
+}
+
+const dayKeyLocal = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
 
 // Catmull-Rom → ベジェで滑らかな線に
 function smooth(pts: readonly (readonly [number, number])[]) {

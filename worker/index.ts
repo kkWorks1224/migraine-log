@@ -219,7 +219,8 @@ app.post("/auth/logout", async (c) => {
 });
 
 // ---------- weather（ログイン不要：未ログインでも記録に気圧を残せるように） ----------
-type Hourly = { t: number[]; p: (number | null)[]; temp: (number | null)[]; rh: (number | null)[]; code: (number | null)[] };
+type Daily = { t: number[]; code: (number | null)[]; tmax: (number | null)[]; tmin: (number | null)[]; pop: (number | null)[] };
+type Hourly = { t: number[]; p: (number | null)[]; temp: (number | null)[]; rh: (number | null)[]; code: (number | null)[]; daily?: Daily | null };
 
 async function cached<T>(key: string, ttl: number, load: () => Promise<T | null>): Promise<T | null> {
   const cache = (caches as any).default as Cache;
@@ -238,8 +239,10 @@ async function openMeteo(lat: number, lon: number, past: number): Promise<Hourly
     latitude: String(lat),
     longitude: String(lon),
     hourly: "pressure_msl,temperature_2m,relative_humidity_2m,weather_code",
+    // 週間予報（今日を含む 8 日分。7 日先まで日ごとの注意を出すため）
+    daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
     past_days: String(past),
-    forecast_days: "2",
+    forecast_days: "8",
     timeformat: "unixtime",
     timezone: "auto",
   });
@@ -251,12 +254,26 @@ async function openMeteo(lat: number, lon: number, past: number): Promise<Hourly
     if (!r.ok) return null;
     const j: any = await r.json();
     const h = j.hourly;
+    const d = j.daily;
+    // 週間は今日以降だけ（過去分は不要）
+    const today = Math.floor(Date.now() / 1000) - 86400;
+    const keep = d ? d.time.map((t: number, i: number) => (t >= today ? i : -1)).filter((i: number) => i >= 0) : [];
+    const pick = (a: any[]) => keep.map((i: number) => a?.[i] ?? null);
     return {
       t: h.time.map((s: number) => s * 1000),
       p: h.pressure_msl,
       temp: h.temperature_2m,
       rh: h.relative_humidity_2m,
       code: h.weather_code,
+      daily: d
+        ? {
+            t: keep.map((i: number) => d.time[i] * 1000),
+            code: pick(d.weather_code),
+            tmax: pick(d.temperature_2m_max),
+            tmin: pick(d.temperature_2m_min),
+            pop: pick(d.precipitation_probability_max),
+          }
+        : null,
     };
   } catch {
     return null;
@@ -334,13 +351,14 @@ app.get("/api/weather", async (c) => {
   }
   const hour = Math.floor(Date.now() / 36e5);
   const [hourly, place] = await Promise.all([
-    cached(`om/${lat}/${lon}/${past}/${hour}`, 3600, () => openMeteo(lat, lon, past)).then(
+    cached(`om8/${lat}/${lon}/${past}/${hour}`, 3600, () => openMeteo(lat, lon, past)).then(
       (h) => h ?? cached(`met/${lat}/${lon}/${hour}`, 3600, () => metNo(lat, lon)),
     ),
     placeName(c.env, lat, lon),
   ]);
   if (!hourly) return c.json({ error: "weather_unavailable" }, 502);
-  return c.json({ lat, lon, place, hourly }, 200, { "cache-control": "private, max-age=600" });
+  const { daily, ...h } = hourly;
+  return c.json({ lat, lon, place, hourly: h, daily: daily ?? null }, 200, { "cache-control": "private, max-age=600" });
 });
 
 // ---------- api（ログイン必須） ----------
@@ -687,7 +705,7 @@ export async function runForecastAlerts(env: Env, now = Date.now()) {
     const key = `${s.lat}/${s.lon}`;
     if (!series.has(key)) {
       const slot = Math.floor(now / 36e5);
-      series.set(key, await cached(`om/${s.lat}/${s.lon}/2/${slot}`, 3600, () => openMeteo(s.lat, s.lon, 2)).then((h) => h ?? metNo(s.lat, s.lon)));
+      series.set(key, await cached(`om8/${s.lat}/${s.lon}/2/${slot}`, 3600, () => openMeteo(s.lat, s.lon, 2)).then((h) => h ?? metNo(s.lat, s.lon)));
     }
     const h = series.get(key);
     if (!h) continue;

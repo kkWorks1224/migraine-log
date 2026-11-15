@@ -479,3 +479,28 @@ input, textarea { font: inherit; color: inherit; }
 .steps { overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
 .steps ol { margin: 0; padding-left: 1.4em; font-size: 14px; line-height: 1.7; color: var(--ink); }
 .steps .row-btn.small { word-break: break-all; text-align: left; padding: 8px 14px; height: auto; }
+
+/* 気圧グラフの期間切替 */
+.range { margin-left: auto; display: inline-flex; padding: 2px; border-radius: 13px; background: var(--fill); }
+.range button { position: relative; height: 26px; min-width: 52px; padding: 0 10px; border-radius: 11px; font-size: 12px; font-weight: 600; color: var(--ink2); }
+.range button.on { color: var(--ink); }
+.range button span { position: relative; }
+.range-pill { position: absolute; inset: 0; border-radius: inherit; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); }
+.range button::after { content: ""; position: absolute; inset: -9px -2px; }
+
+/* 週間予報 */
+.week { margin: 10px -6px 2px; padding-top: 10px; border-top: 0.5px solid rgba(60, 60, 67, 0.12); }
+.week-scroll { display: grid; grid-template-columns: repeat(7, minmax(40px, 1fr)); gap: 2px; }
+.wk { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 0 6px; border-radius: 14px; }
+.wk.mid { background: rgba(255, 149, 0, 0.1); }
+.wk.high { background: rgba(255, 59, 48, 0.1); }
+.wk-day { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.wk-day.sun { color: var(--red); }
+.wk-day.sat { color: var(--blue); }
+.wk-t { display: flex; flex-direction: column; align-items: center; line-height: 1.15; font-family: var(--round); font-variant-numeric: tabular-nums; }
+.wk-t b { font-size: 14px; font-weight: 600; }
+.wk-t small { font-size: 12px; color: var(--ink2); }
+.wk-pop { font-size: 11px; color: #2a7fd4; min-height: 14px; font-variant-numeric: tabular-nums; }
+.wk-alert { font-size: 10px; font-weight: 700; min-height: 13px; color: #c25e00; white-space: nowrap; }
+.wk.high .wk-alert { color: #c0271d; }
+.wk-note { margin: 6px 6px 0; font-size: 11px; line-height: 1.5; color: var(--ink3); }
