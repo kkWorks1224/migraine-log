@@ -19,11 +19,12 @@ function load(): Persisted {
 const initial = load();
 // キャッシュがあれば初回描画から一覧を出す（スケルトンはキャッシュの無い初回起動時のみ）
 const hadCache = Object.keys(initial.entries).length > 0 || initial.user !== null;
-let state: Persisted & { sync: SyncState; ready: boolean; googleEnabled: boolean } = {
+let state: Persisted & { sync: SyncState; ready: boolean; googleEnabled: boolean; vapidKey: string | null } = {
   ...initial,
   sync: "idle",
   ready: hadCache,
   googleEnabled: true,
+  vapidKey: null,
 };
 const listeners = new Set<() => void>();
 
@@ -70,6 +71,7 @@ export const blankDraft = (): Draft => ({
   sleepLack: false,
   triggers: [],
   symptoms: [],
+  prodromes: [],
   weather: null,
 });
 
@@ -94,6 +96,16 @@ export const actions = {
   remove(id: string) {
     const e = state.entries[id];
     if (e) write({ ...e, deleted: true, updatedAt: Date.now() });
+  },
+  // 頭痛のなかった日（その日の正午を代表時刻にする）
+  markClear(day: number) {
+    const d = new Date(day);
+    const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
+    return actions.add({ ...blankDraft(), kind: "clear", status: "gone", startedAt: noon, endedAt: noon });
+  },
+  addMidas(answers: number[]) {
+    const now = Date.now();
+    return actions.add({ ...blankDraft(), kind: "midas", status: "gone", midas: answers, startedAt: now, endedAt: now });
   },
   restore(snapshot: Entry) {
     write({ ...snapshot, deleted: false, updatedAt: Date.now() });
@@ -151,11 +163,11 @@ export async function boot() {
   const started = performance.now();
   try {
     const res = await fetch("/api/me", { credentials: "same-origin" });
-    const data = (await res.json()) as { user: User | null; googleEnabled: boolean };
+    const data = (await res.json()) as { user: User | null; googleEnabled: boolean; vapidKey: string | null };
     const switched = state.user && data.user && state.user.id !== data.user.id;
     if (switched) emit({ entries: {}, dirty: [], since: 0 });
     // 未ログインで書いた記録はログイン時にまとめてアップロードされる（dirty に残っているため）
-    emit({ user: data.user, googleEnabled: data.googleEnabled });
+    emit({ user: data.user, googleEnabled: data.googleEnabled, vapidKey: data.vapidKey });
     if (data.user) await sync();
   } catch {
     emit({ sync: "offline" });
@@ -197,6 +209,7 @@ export type Parsed = {
   sleepLack: boolean;
   triggers: string[];
   symptoms: string[];
+  prodromes: string[];
   time: string | null;
   status: Status;
 };

@@ -24,7 +24,9 @@
     { "name": "WEATHER_LIMITER", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } },
     { "name": "SYNC_LIMITER", "namespace_id": "2003", "simple": { "limit": 120, "period": 60 } }
   ],
+  "triggers": { "crons": ["5 * * * *"] },
   "vars": {
+    "VAPID_PUBLIC_KEY": "BB2pyypdozdza6rhZzOrxnLS6m-fU3qbBeEc58CDjX6TmSkYESQBkt8qcGFro8pIxrTgZyaU5kCj3QRQRdVVnDg",
     "GOOGLE_CLIENT_ID": "674715201485-v8pugkcd7a0sc6tflormd7p9mss7j8u7.apps.googleusercontent.com",
     "AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   }

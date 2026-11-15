@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
-import { actions, sync as runSync, useBootSync, useStore, type SyncState, type User } from "./store";
-import { STATUSES, type Entry, type Status } from "./types";
+import { actions, getState, sync as runSync, useBootSync, useStore, type SyncState, type User } from "./store";
+import { kindOf, STATUSES, type Entry, type Status } from "./types";
 import { EntryCard, STATUS_META, type Action } from "./EntryCard";
 import { Composer } from "./Composer";
 import { PressureCard } from "./PressureCard";
 import { EntrySheet } from "./EntrySheet";
 import { StatsSheet } from "./StatsSheet";
 import { BottomSheet, Segmented, spring } from "./ui";
-import { attachWeather, getGeo } from "./weather";
+import { attachWeather, getGeo, loadSeries, useWeather } from "./weather";
+import { useForecast } from "./useForecast";
+import { disablePush, enablePush, pushSupport, refreshPush, savedPush, testPush } from "./push";
 import { dayKey, fmtDayLong } from "./format";
-import { Chart, GoogleG, Person } from "./icons";
+import { Bell, Chart, Check, ChevronRight, GoogleG, Mic, Person } from "./icons";
 import { haptic } from "./haptics";
 
 type Toast = { id: number; text: string; undo?: () => void };
@@ -58,12 +60,23 @@ export function App() {
     () => Object.values(s.entries).filter((e) => !e.deleted).sort((a, b) => b.startedAt - a.startedAt),
     [s.entries],
   );
+  // 一覧・件数は頭痛の記録だけ（頭痛なしの日・支障度の回答は含めない）
+  const headaches = useMemo(() => live.filter((e) => kindOf(e) === "headache"), [live]);
   const counts = useMemo(() => {
     const c = { pain: 0, easing: 0, gone: 0 } as Record<Status, number>;
-    live.forEach((e) => c[e.status]++);
+    headaches.forEach((e) => c[e.status]++);
     return c;
-  }, [live]);
-  const visible = live.filter((e) => e.status === tab);
+  }, [headaches]);
+  const visible = headaches.filter((e) => e.status === tab);
+  const fc = useForecast(live);
+  const ws = useWeather();
+  // 通知の基準・場所を最新の分析に合わせる
+  useEffect(() => {
+    if (fc && ws.series) refreshPush(ws.series.lat, ws.series.lon, fc.analysis.threshold);
+  }, [fc?.analysis.threshold, ws.series?.lat, ws.series?.lon]);
+  const todayKey = dayKey(now);
+  const todayClear = live.find((e) => kindOf(e) === "clear" && dayKey(e.startedAt) === todayKey);
+  const todayPain = headaches.some((e) => dayKey(e.startedAt) === todayKey);
 
   // 治まった一覧は日付ごとに見出しを入れる
   const rows = useMemo(() => {
@@ -110,7 +123,17 @@ export function App() {
   const onAdded = useCallback(
     (e: Entry) => {
       if (tab !== e.status) changeTab(e.status);
-      showToast({ text: "記録しました", undo: () => actions.remove(e.id) });
+      // 同じ日に「頭痛なし」が付いていたら外す
+      Object.values(getState().entries)
+        .filter((x) => !x.deleted && kindOf(x) === "clear" && dayKey(x.startedAt) === dayKey(e.startedAt))
+        .forEach((x) => actions.remove(x.id));
+      // 薬を記録したら、今月の服薬日数をその場で知らせる（使いすぎの目安は月10日）
+      let text = "記録しました";
+      if (e.meds.length) {
+        const n = medDaysThisMonth(Object.values(getState().entries));
+        text = n > 10 ? `今月の服薬 ${n}日目・使いすぎの目安を超えています` : n === 10 ? `今月の服薬 ${n}日目・使いすぎの目安に達しました` : n >= 8 ? `今月の服薬 ${n}日目・目安の10日に近づいています` : `記録しました・今月の服薬 ${n}日目`;
+      }
+      showToast({ text, undo: () => actions.remove(e.id) });
       // 記録した時点の現在地の気圧・天気を添える（初回はここで位置情報の許可を求める）
       const g = getGeo();
       if (g !== "denied" && g !== "unsupported") attachWeather(e.id);
@@ -125,7 +148,7 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <Composer entries={live} loggedIn={!!s.user} onAdded={onAdded} needLogin={needLogin} toast={(text) => showToast({ text })} />
+      <Composer entries={headaches} loggedIn={!!s.user} onAdded={onAdded} needLogin={needLogin} toast={(text) => showToast({ text })} />
       <HeaderButtons user={s.user} sync={s.sync} ready={s.ready} onAccount={() => setSheet("account")} onStats={() => setSheet("stats")} />
 
       <AnimatePresence mode="wait">
@@ -140,7 +163,7 @@ export function App() {
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
           >
-            <PressureCard />
+            <PressureCard entries={live} />
             <Segmented
               id="tab"
               options={STATUSES}
@@ -216,6 +239,17 @@ export function App() {
                     >
                       <span className={`empty-dot ${tab}`} />
                       <p>{EMPTY_HINT[tab]}</p>
+                      {tab === "pain" && !todayPain && (
+                        <ClearDayButton
+                          done={!!todayClear}
+                          onMark={() => {
+                            const e = actions.markClear(now);
+                            haptic("success");
+                            showToast({ text: "今日は頭痛なしと記録しました", undo: () => actions.remove(e.id) });
+                          }}
+                          onUnmark={() => todayClear && actions.remove(todayClear.id)}
+                        />
+                      )}
                     </motion.li>
                   )}
                 </motion.ul>
@@ -235,8 +269,45 @@ export function App() {
         needLogin={needLogin}
         onOpenEntry={(e) => setEditing(e.id)}
       />
-      <AccountSheet open={sheet === "account"} onClose={() => setSheet(null)} user={s.user} sync={s.sync} googleEnabled={s.googleEnabled} />
+      <AccountSheet
+        open={sheet === "account"}
+        onClose={() => setSheet(null)}
+        user={s.user}
+        sync={s.sync}
+        googleEnabled={s.googleEnabled}
+        threshold={fc?.analysis.threshold ?? null}
+        toast={(text) => showToast({ text })}
+      />
     </MotionConfig>
+  );
+}
+
+export function medDaysThisMonth(all: Entry[], now = Date.now()) {
+  const d = new Date(now);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  return new Set(
+    all.filter((e) => !e.deleted && kindOf(e) === "headache" && e.meds.length && e.startedAt >= start && e.startedAt <= now).map((e) => dayKey(e.startedAt)),
+  ).size;
+}
+
+// 頭痛のなかった日を 1 タップで残す（気圧との関係を正しく比べるため）
+function ClearDayButton({ done, onMark, onUnmark }: { done: boolean; onMark: () => void; onUnmark: () => void }) {
+  return (
+    <motion.button
+      type="button"
+      className={`clear-btn ${done ? "done" : ""}`}
+      data-testid="clear-day"
+      aria-pressed={done}
+      onClick={() => (done ? onUnmark() : onMark())}
+      whileTap={{ scale: 0.96 }}
+      layout
+      transition={spring}
+    >
+      <motion.span className="clear-check" initial={false} animate={{ scale: done ? 1 : 0.8, opacity: done ? 1 : 0.5 }} transition={spring}>
+        <Check width={14} height={14} />
+      </motion.span>
+      {done ? "今日は頭痛なし（記録済み）" : "今日は頭痛なし"}
+    </motion.button>
   );
 }
 
@@ -319,12 +390,16 @@ function AccountSheet({
   user,
   sync,
   googleEnabled,
+  threshold,
+  toast,
 }: {
   open: boolean;
   onClose: () => void;
   user: User | null;
   sync: SyncState;
   googleEnabled: boolean;
+  threshold: number | null;
+  toast: (t: string) => void;
 }) {
   return (
     <BottomSheet open={open} onClose={onClose} label="アカウント" testid="account-sheet">
@@ -370,6 +445,8 @@ function AccountSheet({
           <p className="fine">ログインすると端末間で同期され、AI 機能が使えます。</p>
         </div>
       )}
+      <NotifySection loggedIn={!!user} threshold={threshold} toast={toast} />
+      <ShortcutSection />
       <dl className="legend">
         <div>
           <dt>右へフリック</dt>
@@ -389,6 +466,118 @@ function AccountSheet({
         </div>
       </dl>
     </BottomSheet>
+  );
+}
+
+// 気圧の注意をプッシュ通知で受け取る
+function NotifySection({ loggedIn, threshold, toast }: { loggedIn: boolean; threshold: number | null; toast: (t: string) => void }) {
+  const ws = useWeather();
+  const [on, setOn] = useState(() => !!savedPush());
+  const [busy, setBusy] = useState(false);
+  const support = pushSupport();
+  const toggle = async () => {
+    if (busy) return;
+    haptic("light");
+    setBusy(true);
+    try {
+      if (on) {
+        await disablePush();
+        setOn(false);
+        toast("通知をオフにしました");
+      } else {
+        const s = ws.series ?? (await loadSeries());
+        if (!s) throw new Error("no_location");
+        await enablePush(s.lat, s.lon, threshold ?? -2);
+        setOn(true);
+        haptic("success");
+        toast("気圧が下がりそうなときにお知らせします");
+      }
+    } catch (e) {
+      const m = (e as Error).message;
+      toast(m === "denied" ? "通知が許可されていません（設定から許可してください）" : m === "no_location" ? "位置情報をオンにしてください" : "通知を設定できませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="acc-sec" data-testid="notify-section">
+      <h3>
+        <Bell width={15} height={15} />
+        気圧の注意を通知
+      </h3>
+      {support === "ios-home" ? (
+        <p className="fine left">iPhoneでは、Safariの共有ボタンから「ホーム画面に追加」したアプリで使えます（iOS 16.4以降）。</p>
+      ) : support === "unsupported" ? (
+        <p className="fine left">このブラウザは通知に対応していません。</p>
+      ) : !loggedIn ? (
+        <p className="fine left">ログインすると使えます。</p>
+      ) : (
+        <>
+          <button type="button" className={`switch-row ${on ? "on" : ""}`} role="switch" aria-checked={on} onClick={toggle} disabled={busy} data-testid="notify-toggle">
+            気圧の低下をお知らせ
+            <span className="switch">
+              <motion.i layout transition={{ type: "spring", stiffness: 700, damping: 35 }} />
+            </span>
+          </button>
+          <p className="fine left">この先12時間に下がりそうなとき、7時〜22時に届きます。通知のため、現在地をおおよそ10km単位で保存します。</p>
+          {on && (
+            <button
+              type="button"
+              className="row-btn small"
+              onClick={async () => {
+                try {
+                  const n = await testPush();
+                  toast(n ? "テスト通知を送りました" : "送れる端末がありません");
+                } catch {
+                  toast("テスト通知を送れませんでした");
+                }
+              }}
+              data-testid="notify-test"
+            >
+              テスト通知を送る
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// Siri・ショートカットから音声で記録
+function ShortcutSection() {
+  const [open, setOpen] = useState(false);
+  const url = `${location.origin}/#memo=`;
+  return (
+    <section className="acc-sec" data-testid="shortcut-section">
+      <button type="button" className="acc-head" onClick={() => setOpen(!open)} aria-expanded={open} data-testid="shortcut-open">
+        <Mic width={15} height={15} />
+        Siriで音声記録
+        <ChevronRight width={14} height={14} style={{ marginLeft: "auto", transform: open ? "rotate(90deg)" : "none", transition: "transform 200ms" }} />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div className="steps" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.22 }}>
+            <ol>
+              <li>「ショートカット」アプリで新規ショートカットを作る</li>
+              <li>「テキストを音声入力」を追加</li>
+              <li>「URLエンコード」を追加（入力は音声入力のテキスト）</li>
+              <li>「URL」を追加し、下のアドレスの後ろにエンコード結果を入れる</li>
+              <li>「URLを開く」を追加</li>
+              <li>名前を「頭痛ログ」にする →「Hey Siri、頭痛ログ」で話すだけで記録</li>
+            </ol>
+            <button
+              type="button"
+              className="row-btn small"
+              onClick={() => navigator.clipboard?.writeText(url)}
+              data-testid="shortcut-copy"
+            >
+              アドレスをコピー：{url}
+            </button>
+            <p className="fine left">ログイン中はAIで整理してから記録します。Safariとホーム画面のアプリで記録を共有するにはログインしてください。</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { Weather } from "./types";
 import { actions, getState } from "./store";
+import { rateAt } from "./forecast";
 
 export type Hourly = { t: number[]; p: (number | null)[]; temp: (number | null)[]; rh: (number | null)[]; code: (number | null)[] };
 export type Series = { lat: number; lon: number; place: string | null; fetchedAt: number; past: number; hourly: Hourly };
@@ -85,7 +86,9 @@ const near = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) 
 let inflight: Promise<Series | null> | null = null;
 
 // 現在地の気圧系列（過去 past 日〜48 時間後）を取得
-export function loadSeries({ force = false, past = 2 } = {}): Promise<Series | null> {
+export function loadSeries({ force = false, past = 92 } = {}): Promise<Series | null> {
+  // 本人の記録との比較（頭痛が出やすい下がり方の分析）に使うため、常に最大の 92 日分を取る
+  past = Math.max(past, 92);
   if (inflight) return inflight;
   inflight = (async () => {
     set({ loading: true, error: false });
@@ -136,6 +139,7 @@ export function snapshotAt(s: Series, t: number): Weather | null {
     pressure: r1(p),
     d3h: p3 != null ? r1(p - p3) : null,
     d24h: p24 != null ? r1(p - p24) : null,
+    trend: rateAt(h, h.t[best]),
     temp: h.temp[best] != null ? r1(h.temp[best]!) : null,
     humidity: h.rh[best] != null ? Math.round(h.rh[best]!) : null,
     code: h.code[best] ?? null,

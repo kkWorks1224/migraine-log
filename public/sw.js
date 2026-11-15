@@ -1,5 +1,5 @@
 // アプリシェルをキャッシュして「開いた瞬間」に表示する（API は常にネットワーク）
-const CACHE = "ml-shell-v2";
+const CACHE = "ml-shell-v3";
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/"])).then(() => self.skipWaiting()));
 });
@@ -31,4 +31,28 @@ self.addEventListener("fetch", (e) => {
       }),
     );
   }
+});
+
+// 気圧の注意のプッシュ通知
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) {}
+  e.waitUntil(
+    self.registration.showNotification(d.title || "頭痛ログ", {
+      body: d.body || "",
+      tag: d.tag || "pressure",
+      icon: "/icon-512.png",
+      badge: "/icon-512.png",
+      data: { url: "/" },
+    }),
+  );
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) => {
+      const c = cs.find((x) => new URL(x.url).origin === location.origin);
+      return c ? c.focus() : self.clients.openWindow("/");
+    }),
+  );
 });

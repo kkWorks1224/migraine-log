@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { actions, fromLocalInput, toLocalInput, useStore } from "./store";
-import { STATUSES, SYMPTOMS, TRIGGERS, type Entry, type MedEffect } from "./types";
+import { PRODROMES, STATUSES, SYMPTOMS, TRIGGERS, type Entry, type MedEffect } from "./types";
 import { AddChip, BottomSheet, ChipSet, IntensityPicker, Segmented } from "./ui";
 import { STATUS_META } from "./EntryCard";
 import { fmtDuration, fmtWhen, medSuggestions, signed } from "./format";
@@ -151,6 +151,12 @@ export function EntrySheet({ id, onClose, onDelete }: { id: string | null; onClo
             </div>
           </Section>
 
+          <Section title="前ぶれ">
+            <div className="chips wrap">
+              <ChipSet options={PRODROMES} value={e.prodromes ?? []} onChange={(v) => p({ prodromes: v })} tone="indigo" />
+            </div>
+          </Section>
+
           <Section title="天気">
             {e.weather ? (
               <div className="wx" data-testid="detail-weather">
@@ -181,9 +187,9 @@ export function EntrySheet({ id, onClose, onDelete }: { id: string | null; onClo
                   </span>
                 </div>
                 <div className="wx-deltas">
-                  {e.weather.d3h != null && (
-                    <span className={e.weather.d3h <= -1.5 ? "down" : ""}>
-                      3h <b>{signed(e.weather.d3h)}</b>
+                  {e.weather.trend != null && (
+                    <span className={e.weather.trend <= -2 ? "down" : ""}>
+                      6h <b>{signed(e.weather.trend)}</b>
                     </span>
                   )}
                   {e.weather.d24h != null && (

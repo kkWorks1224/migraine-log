@@ -2,8 +2,8 @@ import { forwardRef, useRef, useState, type ReactElement } from "react";
 import { animate, motion, useMotionValue, useMotionValueEvent, useTransform, type PanInfo } from "motion/react";
 import type { Entry, Status } from "./types";
 import { INTENSITY } from "./types";
-import { Bolt, Check, Moon, Pill, Trash, Undo, Wave } from "./icons";
-import { fmtDay, fmtDuration, fmtTime, INTENSITY_COLOR, signed } from "./format";
+import { Bolt, Check, Moon, Pill, Signal, Trash, Undo, Wave } from "./icons";
+import { fmtDay, fmtDuration, fmtTime, INTENSITY_COLOR, isDropW, signed } from "./format";
 import { haptic } from "./haptics";
 
 export type Action = Status | "delete";
@@ -169,10 +169,16 @@ export const EntryCard = forwardRef<HTMLLIElement, Props>(function EntryCard(
                 {t}
               </span>
             ))}
+            {(e.prodromes ?? []).map((t) => (
+              <span key={`p-${t}`} className="tag indigo">
+                <Signal width={11} height={11} />
+                {t}
+              </span>
+            ))}
             {w && (
-              <span className={`tag hpa ${w.d3h != null && w.d3h <= -1.5 ? "drop" : ""}`} data-testid="entry-weather">
+              <span className={`tag hpa ${isDropW(w) ? "drop" : ""}`} data-testid="entry-weather">
                 {Math.round(w.pressure)}hPa
-                {w.d3h != null && <b>{signed(w.d3h)}</b>}
+                {w.trend != null ? <b>{signed(w.trend)}</b> : w.d24h != null && <b>{signed(w.d24h)}</b>}
               </span>
             )}
           </div>

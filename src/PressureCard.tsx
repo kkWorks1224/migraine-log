@@ -1,16 +1,20 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { animate, AnimatePresence, motion, useMotionValue, useTransform } from "motion/react";
-import { checkPermission, loadSeries, nextDrop, sky, SKY_LABEL, snapshotAt, useWeather, type Series } from "./weather";
-import { Drop, Location, Refresh, Sky } from "./icons";
-import { fmtTime, signed } from "./format";
+import { checkPermission, loadSeries, sky, SKY_LABEL, snapshotAt, useWeather, type Series } from "./weather";
+import { ChevronRight, Drop, Location, Refresh, Sky } from "./icons";
+import { signed } from "./format";
+import { analysisText, useForecast, whenLabel, type Forecast } from "./useForecast";
+import { findDrops, GENERAL_THRESHOLD, LEVEL_LABEL } from "./forecast";
+import type { Entry } from "./types";
 import { haptic } from "./haptics";
 
 const W = 320;
 const H = 100;
 const PAD = 6;
 
-export function PressureCard() {
+export function PressureCard({ entries }: { entries: Entry[] }) {
   const ws = useWeather();
+  const fc = useForecast(entries);
 
   useEffect(() => {
     checkPermission();
@@ -31,8 +35,7 @@ export function PressureCard() {
   const s = ws.series;
   const now = Date.now();
   const cur = useMemo(() => (s ? snapshotAt(s, now) : null), [s, Math.floor(now / 6e5)]);
-  const drop = useMemo(() => (s ? nextDrop(s, now) : null), [s, Math.floor(now / 6e5)]);
-  const trend = trendOf(cur?.d3h ?? null, cur?.d24h ?? null);
+  const trend = trendOf(cur?.trend ?? null, cur?.d24h ?? null);
 
   // 画面上部の空の色を気圧の傾向に合わせる
   useEffect(() => {
@@ -57,7 +60,7 @@ export function PressureCard() {
               <Count value={cur.pressure} />
               <small>hPa</small>
             </span>
-            {cur.d3h != null && (
+            {cur.trend != null && (
               <span className={`pc-trend ${trend.key}`} data-testid="trend">
                 {trend.label}
               </span>
@@ -77,21 +80,11 @@ export function PressureCard() {
           </div>
         </div>
         <div className="pc-deltas">
-          {cur.d3h != null && <Delta label="3時間" v={cur.d3h} warn={-1.5} testid="d3h" />}
+          {cur.trend != null && <Delta label="6時間" v={cur.trend} warn={-2} testid="d6h" />}
           {cur.d24h != null && <Delta label="24時間" v={cur.d24h} warn={-5} />}
-          {drop && drop.d <= -1.5 && (
-            <motion.span
-              className="delta ahead"
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.25 }}
-              data-testid="next-drop"
-            >
-              {fmtTime(drop.t)}ごろ {signed(drop.d)}
-            </motion.span>
-          )}
         </div>
-        <Chart s={s} now={now} />
+        <Chart s={s} now={now} threshold={fc?.analysis.threshold ?? GENERAL_THRESHOLD} />
+        {fc && <ForecastRow fc={fc} />}
       </motion.div>
     );
   } else if (ws.geo === "denied" || ws.geo === "unsupported") {
@@ -139,13 +132,70 @@ export function PressureCard() {
   );
 }
 
+// この先 48 時間の注意予報（最初の 2 件）
+function ForecastRow({ fc }: { fc: Forecast }) {
+  const [open, setOpen] = useState(false);
+  const evs = fc.events.slice(0, 2);
+  return (
+    <div className="fc" data-testid="forecast">
+      {evs.length === 0 ? (
+        <p className="fc-none">この先48時間、頭痛に注意が必要な下がり方はありません</p>
+      ) : (
+        evs.map((ev, i) => (
+          <motion.div
+            key={ev.from}
+            className={`fc-ev ${ev.level}`}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 + i * 0.06, duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+            data-testid="forecast-event"
+          >
+            <span className="fc-level">注意 {LEVEL_LABEL[ev.level]}</span>
+            <span className="fc-text">
+              {ev.from <= Date.now() + 30 * 6e4 ? (
+                <>
+                  <b>今、下がっています</b>
+                  {whenLabel(ev.to)}まで続く見込み（6時間で {signed(ev.peak)}hPa）
+                </>
+              ) : (
+                <>
+                  <b>{whenLabel(ev.from)}から</b>
+                  気圧が下がります（6時間で {signed(ev.peak)}hPa）
+                </>
+              )}
+            </span>
+          </motion.div>
+        ))
+      )}
+      <button type="button" className="fc-basis" onClick={() => setOpen(!open)} aria-expanded={open} data-testid="forecast-basis">
+        {fc.analysis.mode === "personal" ? "あなたの記録にもとづく予報" : fc.analysis.mode === "unclear" ? "大きな低下だけを表示中" : "一般的な目安による予報"}
+        <ChevronRight width={12} height={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 200ms" }} />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.p
+            className="fc-why"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22, ease: [0.23, 1, 0.32, 1] }}
+          >
+            {analysisText(fc.analysis)}
+          </motion.p>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 type TrendKey = "steady" | "falling" | "steep" | "rising";
-function trendOf(d3h: number | null, d24h: number | null): { key: TrendKey; label: string } {
-  if (d3h == null) return { key: "steady", label: "" };
-  if (d3h <= -2.5) return { key: "steep", label: "急に下がっています" };
-  if (d3h <= -1.5) return { key: "falling", label: "下がっています" };
+// 日内変動を除いた 6 時間あたりの変化で判定
+function trendOf(d6: number | null, d24h: number | null): { key: TrendKey; label: string } {
+  if (d6 == null) return { key: "steady", label: "" };
+  if (d6 <= -3.2) return { key: "steep", label: "急に下がっています" };
+  if (d6 <= -2) return { key: "falling", label: "下がっています" };
   if (d24h != null && d24h <= -5) return { key: "falling", label: "この1日で大きく下がりました" };
-  if (d3h >= 1.5) return { key: "rising", label: "上がっています" };
+  if (d6 >= 2) return { key: "rising", label: "上がっています" };
   if (d24h != null && d24h >= 5) return { key: "rising", label: "この1日で大きく上がりました" };
   return { key: "steady", label: "安定しています" };
 }
@@ -171,7 +221,7 @@ function Count({ value }: { value: number }) {
 }
 
 // 過去 24 時間〜24 時間後の気圧。急な低下（3 時間で 1.5hPa 以上）の区間を強調する
-function Chart({ s, now }: { s: Series; now: number }) {
+function Chart({ s, now, threshold }: { s: Series; now: number; threshold: number }) {
   const g = useMemo(() => {
     const h = s.hourly;
     const pts: { t: number; p: number }[] = [];
@@ -190,16 +240,15 @@ function Chart({ s, now }: { s: Series; now: number }) {
     const xy = pts.map((x) => [X(x.t), Y(x.p)] as const);
     const line = smooth(xy);
     const area = `${line} L${xy[xy.length - 1][0]},${H - 14} L${xy[0][0]},${H - 14} Z`;
-    const drops: string[] = [];
-    for (let i = 3; i < pts.length; i++) {
-      if (pts[i].p - pts[i - 3].p <= -1.5 && pts[i].t - pts[i - 3].t <= 3.5 * 36e5) {
-        drops.push(smooth(xy.slice(i - 3, i + 1)));
-      }
-    }
+    // 注意が必要な低下の区間（日内変動を除いた下がり方で判定）をオレンジに
+    const drops = findDrops(s.hourly, t0, t1, threshold)
+      .map((ev) => xy.filter((_, i) => pts[i].t >= ev.from && pts[i].t <= ev.to))
+      .filter((seg) => seg.length >= 2)
+      .map((seg) => smooth(seg));
     let nowP = pts[0].p;
     for (const x of pts) if (x.t <= now) nowP = x.p;
     return { line, area, drops, nx: X(now), ny: Y(nowP), lo, hi };
-  }, [s, Math.floor(now / 6e5)]);
+  }, [s, threshold, Math.floor(now / 6e5)]);
 
   if (!g) return null;
   return (

@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { actions, aiParse, blankDraft, fromLocalInput, toLocalInput, type Draft } from "./store";
-import { INTENSITY, SYMPTOMS, TRIGGERS, type Entry } from "./types";
-import { fmtWhen, INTENSITY_COLOR, medSuggestions } from "./format";
+import { INTENSITY, PRODROMES, SYMPTOMS, TRIGGERS, type Entry } from "./types";
+import { dayKey, fmtWhen, INTENSITY_COLOR, medSuggestions } from "./format";
 import { AddChip, ChipSet, IntensityPicker, spring } from "./ui";
-import { ArrowUp, Bolt, Clock, Moon, Pill, Sparkles, Wave } from "./icons";
+import { ArrowUp, Bolt, Clock, Moon, Pill, Signal, Sparkles, Wave } from "./icons";
 import { haptic } from "./haptics";
 import { STATUS_META } from "./EntryCard";
 
-type Panel = "intensity" | "meds" | "triggers" | "symptoms" | null;
+type Panel = "intensity" | "meds" | "triggers" | "symptoms" | "prodromes" | null;
 
 const DRAFT_KEY = "ml.draft";
 const DETAIL_KEY = "ml.draft.detail";
@@ -49,8 +49,9 @@ export function Composer({
   const [filled, setFilled] = useState(0); // AI が埋めた直後の強調用
   const timeRef = useRef<HTMLInputElement>(null);
 
+  const pro = d.prodromes ?? [];
   const dirty =
-    d.intensity > 0 || d.meds.length > 0 || d.sleepLack || d.triggers.length > 0 || d.symptoms.length > 0 || custom || d.status !== "pain";
+    d.intensity > 0 || d.meds.length > 0 || d.sleepLack || d.triggers.length > 0 || d.symptoms.length > 0 || pro.length > 0 || custom || d.status !== "pain";
   const open = hasText || dirty || focused || panel !== null;
   const canSend = hasText || dirty;
 
@@ -82,7 +83,7 @@ export function Composer({
     const memo = el.value.trim();
     const { d, custom, onAdded } = latest.current;
     const isDirty =
-      d.intensity > 0 || d.meds.length > 0 || d.sleepLack || d.triggers.length > 0 || d.symptoms.length > 0 || custom;
+      d.intensity > 0 || d.meds.length > 0 || d.sleepLack || d.triggers.length > 0 || d.symptoms.length > 0 || (d.prodromes ?? []).length > 0 || custom;
     if (!memo && !isDirty) return;
     const e = actions.add({ ...d, memo, startedAt: custom ? d.startedAt : Date.now() });
     reset();
@@ -164,6 +165,7 @@ export function Composer({
           sleepLack: prev.sleepLack || p.sleepLack,
           triggers: [...new Set([...prev.triggers, ...p.triggers])],
           symptoms: [...new Set([...prev.symptoms, ...p.symptoms])],
+          prodromes: [...new Set([...(prev.prodromes ?? []), ...(p.prodromes ?? [])])],
           status: p.status,
           ...(useTime ? { startedAt: t! } : {}),
         },
@@ -177,6 +179,37 @@ export function Composer({
       setThinking(false);
     }
   };
+
+  // Siri・ショートカットからの音声記録：/#memo=テキスト で開くと、そのまま記録する（ログイン中は AI で整理してから）
+  // サーバに本文を送らないよう、クエリではなく URL フラグメントで受け取る
+  // アプリを開いたままでもショートカットから届くよう、hashchange も見る
+  const live = useRef({ runAI: async () => {}, loggedIn });
+  useEffect(() => {
+    const take = () => {
+      const m = location.hash.match(/^#memo=(.*)$/s);
+      if (!m) return;
+      history.replaceState(null, "", location.pathname);
+      let text = "";
+      try {
+        text = decodeURIComponent(m[1].replace(/\+/g, " ")).trim().slice(0, 2000);
+      } catch {
+        return;
+      }
+      if (!text) return;
+      el.value = text;
+      setHasText(true);
+      (async () => {
+        if (live.current.loggedIn) await live.current.runAI();
+        await new Promise((r) => setTimeout(r, 80)); // AI の結果が state に反映されるのを待つ
+        submit();
+      })();
+    };
+    take();
+    window.addEventListener("hashchange", take);
+    return () => window.removeEventListener("hashchange", take);
+  }, [el, submit]);
+
+  live.current = { runAI, loggedIn };
 
   const meds = medSuggestions(entries, d.meds);
   const togglePanel = (p: Panel) => {
@@ -261,8 +294,12 @@ export function Composer({
               <Wave width={16} height={16} />
               {d.symptoms.length ? (d.symptoms.length === 1 ? d.symptoms[0] : `症状 ${d.symptoms.length}`) : "症状"}
             </Tool>
+            <Tool on={pro.length > 0} active={panel === "prodromes"} onClick={() => togglePanel("prodromes")} testid="tool-prodromes" i={6} flash={!!filled}>
+              <Signal width={15} height={15} />
+              {pro.length ? (pro.length === 1 ? pro[0] : `前ぶれ ${pro.length}`) : "前ぶれ"}
+            </Tool>
             {d.status !== "pain" && (
-              <Tool on onClick={() => update({ status: "pain" })} testid="tool-status" i={6}>
+              <Tool on onClick={() => update({ status: "pain" })} testid="tool-status" i={7}>
                 <i className={`dot ${d.status}`} />
                 {STATUS_META[d.status].label}
               </Tool>
@@ -289,10 +326,21 @@ export function Composer({
                   />
                 )}
                 {panel === "meds" && (
-                  <div className="chips">
-                    <ChipSet options={meds} value={d.meds} onChange={(v) => update({ meds: v })} tone="purple" testid="med" />
-                    <AddChip label="薬の名前" onAdd={(v) => update({ meds: [...new Set([...d.meds, v])] })} />
-                  </div>
+                  <>
+                    <div className="chips">
+                      <ChipSet options={meds} value={d.meds} onChange={(v) => update({ meds: v })} tone="purple" testid="med" />
+                      <AddChip label="薬の名前" onAdd={(v) => update({ meds: [...new Set([...d.meds, v])] })} />
+                    </div>
+                    <MedCount entries={entries} adding={d.meds.length > 0} at={custom ? d.startedAt : Date.now()} />
+                  </>
+                )}
+                {panel === "prodromes" && (
+                  <>
+                    <div className="chips">
+                      <ChipSet options={PRODROMES} value={pro} onChange={(v) => update({ prodromes: v })} tone="indigo" testid="prodrome" />
+                    </div>
+                    <p className="med-count">頭痛の前に出ていたサイン。パターンが分かると薬を早めに飲めます</p>
+                  </>
                 )}
                 {panel === "triggers" && (
                   <div className="chips">
@@ -362,6 +410,23 @@ export function Composer({
       {createPortal(buttons, actionsHost)}
       {createPortal(tools, toolsHost)}
     </>
+  );
+}
+
+// 今月の服薬日数（この記録で薬を飲むと何日目になるか）
+function MedCount({ entries, adding, at }: { entries: Entry[]; adding: boolean; at: number }) {
+  const n = useMemo(() => {
+    const days = new Set(
+      entries.filter((e) => e.meds.length && new Date(e.startedAt).getMonth() === new Date(at).getMonth() && new Date(e.startedAt).getFullYear() === new Date(at).getFullYear()).map((e) => dayKey(e.startedAt)),
+    );
+    if (adding) days.add(dayKey(at));
+    return days.size;
+  }, [entries, adding, at]);
+  return (
+    <p className={`med-count ${n >= 8 ? "warn" : ""}`} data-testid="med-count">
+      今月の服薬 {n}日{adding ? "目" : ""}
+      {n > 10 ? "・使いすぎの目安（月10日）を超えています" : n === 10 ? "・使いすぎの目安（月10日）に達しました" : n >= 8 ? "・目安の月10日に近づいています" : ""}
+    </p>
   );
 }
 

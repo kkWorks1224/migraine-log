@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { secureHeaders } from "hono/secure-headers";
-import { STATUSES, SYMPTOMS, TRIGGERS, type Entry } from "../src/types";
+import { PRODROMES, STATUSES, SYMPTOMS, TRIGGERS, type Entry } from "../src/types";
+import { findDrops } from "../src/forecast";
+import { sendPush, validSub, type PushSub, type VapidConfig } from "./push";
 
 type Env = {
   DB: D1Database;
@@ -13,6 +15,8 @@ type Env = {
   AI_LIMITER?: RateLimit;
   WEATHER_LIMITER?: RateLimit;
   SYNC_LIMITER?: RateLimit;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_JWK?: string;
 };
 type User = { id: string; email: string; name: string; picture: string };
 type Vars = { user: User };
@@ -342,7 +346,7 @@ app.get("/api/weather", async (c) => {
 // ---------- api（ログイン必須） ----------
 app.get("/api/me", async (c) => {
   const user = await currentUser(c);
-  return c.json({ user, googleEnabled: Boolean(c.env.GOOGLE_CLIENT_ID) });
+  return c.json({ user, googleEnabled: Boolean(c.env.GOOGLE_CLIENT_ID), vapidKey: c.env.VAPID_PUBLIC_KEY ?? null });
 });
 
 app.use("/api/*", async (c, next) => {
@@ -364,8 +368,14 @@ function sanitize(e: any): Entry | null {
   if (!STATUSES.includes(e.status)) return null;
   if (![e.startedAt, e.createdAt, e.updatedAt].every(Number.isFinite)) return null;
   const w = e.weather;
+  const kind = ["clear", "midas"].includes(e.kind) ? (e.kind as "clear" | "midas") : undefined;
   return {
     id: e.id,
+    ...(kind ? { kind } : {}),
+    prodromes: strList(e.prodromes),
+    ...(kind === "midas" && Array.isArray(e.midas)
+      ? { midas: e.midas.slice(0, 5).map((v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.min(92, Math.max(0, Math.round(v))) : 0)) }
+      : {}),
     memo: typeof e.memo === "string" ? e.memo.slice(0, 4000) : "",
     status: e.status,
     startedAt: e.startedAt,
@@ -383,6 +393,7 @@ function sanitize(e: any): Entry | null {
             pressure: w.pressure,
             d3h: num(w.d3h),
             d24h: num(w.d24h),
+            trend: num(w.trend),
             temp: num(w.temp),
             humidity: num(w.humidity),
             code: num(w.code),
@@ -492,6 +503,7 @@ app.post("/api/ai/parse", async (c) => {
     ' "sleepLack": 寝不足・睡眠不足の記載があれば true,',
     ` "triggers": きっかけの配列。次から選ぶ: ${TRIGGERS.join("、")},`,
     ` "symptoms": 症状の配列。次から選ぶ: ${SYMPTOMS.join("、")},`,
+    ` "prodromes": 頭痛の前に出ていた前ぶれの配列。次から選ぶ: ${PRODROMES.join("、")},`,
     ' "time": 頭痛が始まった時刻の記載があれば "YYYY-MM-DDTHH:MM"（現在日時から計算。時刻が曖昧なら 今朝=07:00、昼=12:00、夕方=17:00、夜=21:00、昨夜=前日の22:00、夜中・明け方=03:00 を目安にする）、無ければ null,',
     ' "status": "pain"=今痛い / "easing"=和らいできた / "gone"=治まった（記載が無ければ "pain"）}',
     "メモに書かれていないことは推測で追加しないこと。",
@@ -510,6 +522,7 @@ app.post("/api/ai/parse", async (c) => {
       sleepLack: p.sleepLack === true,
       triggers: strList(p.triggers).filter((s) => TRIGGERS.includes(s)),
       symptoms: strList(p.symptoms).filter((s) => SYMPTOMS.includes(s)),
+      prodromes: strList(p.prodromes).filter((s) => PRODROMES.includes(s)),
       time: Number.isFinite(t) ? String(p.time).slice(0, 16) : null,
       status: STATUSES.includes(p.status) ? p.status : "pain",
     });
@@ -529,7 +542,7 @@ app.post("/api/ai/insight", async (c) => {
   )
     .bind(user.id, Date.now() - 90 * 864e5)
     .all<{ data: string }>();
-  const entries = results.map((r) => JSON.parse(r.data) as Entry);
+  const entries = results.map((r) => JSON.parse(r.data) as Entry).filter((e) => !e.kind || e.kind === "headache");
   if (entries.length < 3) return c.json({ error: "not_enough" }, 422);
   const blocked = await aiGuard(c);
   if (blocked) return blocked;
@@ -545,7 +558,8 @@ app.post("/api/ai/insight", async (c) => {
       e.sleepLack ? "寝不足" : "",
       e.triggers.length ? `誘因:${e.triggers.join("/")}` : "",
       e.symptoms.length ? `症状:${e.symptoms.join("/")}` : "",
-      w ? `気圧${Math.round(w.pressure)}hPa${w.d3h != null ? ` 3h${w.d3h > 0 ? "+" : ""}${w.d3h.toFixed(1)}` : ""}${w.d24h != null ? ` 24h${w.d24h > 0 ? "+" : ""}${w.d24h.toFixed(1)}` : ""}` : "",
+      e.prodromes?.length ? `前ぶれ:${e.prodromes.join("/")}` : "",
+      w ? `気圧${Math.round(w.pressure)}hPa${w.trend != null ? ` 6h${w.trend > 0 ? "+" : ""}${w.trend.toFixed(1)}` : ""}${w.d24h != null ? ` 24h${w.d24h > 0 ? "+" : ""}${w.d24h.toFixed(1)}` : ""}` : "",
       e.memo ? `メモ:${e.memo.replace(/\s+/g, " ").slice(0, 60)}` : "",
     ]
       .filter(Boolean)
@@ -556,8 +570,8 @@ app.post("/api/ai/insight", async (c) => {
   const day = (ms: number) => new Date(ms + offset * 6e4).toISOString().slice(0, 10);
   const recent = entries.filter((e) => e.startedAt > Date.now() - 30 * 864e5);
   const medDays30 = new Set(recent.filter((e) => e.meds.length).map((e) => day(e.startedAt))).size;
-  const withW = entries.filter((e) => e.weather && e.weather.d3h != null);
-  const drops = withW.filter((e) => (e.weather!.d3h ?? 0) <= -1.5 || (e.weather!.d24h ?? 0) <= -5).length;
+  const withW = entries.filter((e) => e.weather && (e.weather.trend != null || e.weather.d24h != null));
+  const drops = withW.filter((e) => (e.weather!.trend ?? 0) <= -2 || (e.weather!.d24h ?? 0) <= -5).length;
   const facts = [
     `記録件数: ${entries.length}件（直近90日）`,
     `頭痛のあった日数: ${new Set(entries.map((e) => day(e.startedAt))).size}日`,
@@ -568,7 +582,7 @@ app.post("/api/ai/insight", async (c) => {
 
   const system = [
     "あなたは頭痛ダイアリーを読み解くアシスタントです。診断や処方はしません。",
-    "【事実】と【記録】だけを根拠に、読み取れる傾向（時間帯・曜日、寝不足、きっかけ、症状、薬の効き方、気圧の変化）を日本語で簡潔にまとめてください。",
+    "【事実】と【記録】だけを根拠に、読み取れる傾向（時間帯・曜日、寝不足、きっかけ、前ぶれ、症状、薬の効き方、気圧の変化）を日本語で簡潔にまとめてください。",
     "根拠となる件数や割合を必ず添えること。根拠が 1〜2 件しかない傾向や、記録に無いことは書かない。",
     "気圧について書くのは【事実】の「気圧が急に下がっていた記録」が 2 件以上ある場合だけ。",
     "薬の使いすぎに触れるのは【事実】で「10日以上」となっている場合だけ（その場合は医師への相談を勧める）。",
@@ -593,6 +607,129 @@ app.post("/api/ai/insight", async (c) => {
   }
 });
 
+// ---------- 気圧の注意のプッシュ通知 ----------
+const vapid = (env: Env): VapidConfig | null => {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_JWK) return null;
+  return { publicKey: env.VAPID_PUBLIC_KEY, privateJwk: JSON.parse(env.VAPID_PRIVATE_JWK), subject: "https://github.com/kkWorks1224/migraine-log" };
+};
+const MAX_SUBS_PER_USER = 10;
+
+app.post("/api/push/subscribe", async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json<{ subscription?: any; lat?: number; lon?: number; threshold?: number; tz?: number }>();
+  const s = body.subscription;
+  const sub = s && { endpoint: s.endpoint, p256dh: s.keys?.p256dh, auth: s.keys?.auth };
+  const lat = Number(body.lat);
+  const lon = Number(body.lon);
+  if (!validSub(sub) || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return c.json({ error: "bad_request" }, 400);
+  }
+  const threshold = Math.min(-1, Math.max(-6, Number(body.threshold) || -2));
+  const tz = Math.min(840, Math.max(-720, Math.round(Number(body.tz) || 0)));
+  const n = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM push_subs WHERE user_id = ?1 AND endpoint != ?2")
+    .bind(user.id, sub.endpoint)
+    .first<{ n: number }>();
+  if ((n?.n ?? 0) >= MAX_SUBS_PER_USER) return c.json({ error: "too_many" }, 409);
+  const now = Date.now();
+  // 位置は小数 1 桁（約 10km）に丸めて保存
+  await c.env.DB.prepare(
+    `INSERT INTO push_subs (endpoint, user_id, p256dh, auth, lat, lon, threshold, tz, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+     ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth,
+       lat = excluded.lat, lon = excluded.lon, threshold = excluded.threshold, tz = excluded.tz, updated_at = excluded.updated_at`,
+  )
+    .bind(sub.endpoint, user.id, sub.p256dh, sub.auth, Math.round(lat * 10) / 10, Math.round(lon * 10) / 10, threshold, tz, now)
+    .run();
+  return c.json({ ok: true });
+});
+
+app.post("/api/push/unsubscribe", async (c) => {
+  const user = c.get("user");
+  const { endpoint } = await c.req.json<{ endpoint?: string }>();
+  if (typeof endpoint === "string") {
+    await c.env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?1 AND user_id = ?2").bind(endpoint, user.id).run();
+  }
+  return c.json({ ok: true });
+});
+
+app.post("/api/push/test", async (c) => {
+  const user = c.get("user");
+  const v = vapid(c.env);
+  if (!v) return c.json({ error: "not_configured" }, 503);
+  if (c.env.AI_LIMITER && !(await c.env.AI_LIMITER.limit({ key: `push:${user.id}` })).success) return c.json({ error: "rate_limited" }, 429);
+  const { results } = await c.env.DB.prepare("SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ?1").bind(user.id).all<PushSub>();
+  let sent = 0;
+  for (const s of results) {
+    const st = await sendPush(s, { title: "頭痛ログ", body: "通知は届いています。気圧が下がりそうなときにお知らせします。", tag: "test" }, v, 600);
+    if (st === 404 || st === 410) await c.env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?1").bind(s.endpoint).run();
+    else if (st < 300) sent++;
+  }
+  return c.json({ sent });
+});
+
 app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
 
-export default app;
+// 1 時間ごと：購読者の地点の予報を見て、この先 12 時間に注意が必要な低下があれば知らせる
+type SubRow = PushSub & { lat: number; lon: number; threshold: number; tz: number; last_event: number };
+export async function runForecastAlerts(env: Env, now = Date.now()) {
+  const v = vapid(env);
+  if (!v) return { checked: 0, sent: 0 };
+  const { results } = await env.DB.prepare(
+    "SELECT endpoint, p256dh, auth, lat, lon, threshold, tz, last_event FROM push_subs ORDER BY updated_at DESC LIMIT 2000",
+  ).all<SubRow>();
+  const series = new Map<string, Hourly | null>();
+  let sent = 0;
+  for (const s of results) {
+    // 夜間（現地 22:00〜6:59）は送らない。翌朝の回で、まだ始まっていない低下だけ知らせる
+    const local = new Date(now + s.tz * 6e4);
+    const hour = local.getUTCHours();
+    if (hour >= 22 || hour < 7) continue;
+    const key = `${s.lat}/${s.lon}`;
+    if (!series.has(key)) {
+      const slot = Math.floor(now / 36e5);
+      series.set(key, await cached(`om/${s.lat}/${s.lon}/2/${slot}`, 3600, () => openMeteo(s.lat, s.lon, 2)).then((h) => h ?? metNo(s.lat, s.lon)));
+    }
+    const h = series.get(key);
+    if (!h) continue;
+    const ev = findDrops(h, now, now + 12 * 36e5, s.threshold)[0];
+    // 同じ低下を何度も知らせない（前回知らせた低下の開始から 6 時間以内は同じものとみなす）
+    if (!ev || Math.abs(ev.from - s.last_event) < 6 * 36e5) continue;
+    const t = new Date(ev.from + s.tz * 6e4);
+    const sameDay = t.getUTCDate() === local.getUTCDate();
+    const when = `${sameDay ? "" : "明日 "}${t.getUTCHours()}時ごろ`;
+    const drop = Math.abs(ev.peak).toFixed(1);
+    const body =
+      ev.from <= now + 30 * 6e4
+        ? `今、気圧が下がっています（6時間で −${drop}hPa）。薬を手元に。`
+        : `${when}から気圧が下がります（6時間で −${drop}hPa）。薬を手元に。`;
+    const st = await sendPush(
+      s,
+      { title: "気圧の注意", body, tag: "pressure" },
+      v,
+    );
+    if (st === 404 || st === 410) {
+      await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?1").bind(s.endpoint).run();
+    } else if (st < 300) {
+      sent++;
+      await env.DB.prepare("UPDATE push_subs SET last_event = ?1 WHERE endpoint = ?2").bind(ev.from, s.endpoint).run();
+    } else {
+      console.error("push failed", st);
+    }
+  }
+  return { checked: results.length, sent };
+}
+
+// ローカル開発専用：Cron の処理を手動で走らせる
+app.get("/auth/dev/cron", async (c) => {
+  const host = new URL(c.req.url).hostname;
+  if (c.env.DEV_LOGIN !== "1" || !["localhost", "127.0.0.1"].includes(host)) return c.notFound();
+  const at = Number(c.req.query("at")) || Date.now();
+  return c.json(await runForecastAlerts(c.env, at));
+});
+
+export default {
+  fetch: app.fetch,
+  scheduled: (_e: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(runForecastAlerts(env).then((r) => console.log("forecast alerts", r)));
+  },
+} satisfies ExportedHandler<Env>;

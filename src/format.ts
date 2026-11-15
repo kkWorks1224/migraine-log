@@ -47,4 +47,8 @@ export function medSuggestions(entries: Entry[], selected: string[] = [], n = 6)
   return list.slice(0, Math.max(n, selected.length + (used.length ? 2 : 0)));
 }
 
+// 記録時点で気圧が大きく下がっていたか（日内変動を除いて 6 時間で 2hPa 以上、または 24 時間で 5hPa 以上）
+export const isDropW = (w: { trend?: number | null; d24h: number | null } | null | undefined) =>
+  !!w && ((w.trend != null && w.trend <= -2) || (w.d24h ?? 0) <= -5);
+
 export const INTENSITY_COLOR = ["var(--gray)", "var(--yellow)", "var(--orange)", "var(--red)"];

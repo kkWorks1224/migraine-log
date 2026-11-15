@@ -1,16 +1,18 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import type { Entry } from "./types";
-import { INTENSITY } from "./types";
+import { INTENSITY, kindOf, midasGrade, type Entry } from "./types";
 import { aiInsight } from "./store";
 import { BottomSheet, spring } from "./ui";
-import { dayKey, fmtDuration, fmtTime, INTENSITY_COLOR, WD } from "./format";
+import { isDropW, dayKey, fmtDayLong, fmtDuration, fmtTime, INTENSITY_COLOR, WD } from "./format";
+import { analysisText, useForecast } from "./useForecast";
+import { MidasSheet } from "./Midas";
+import { Report } from "./Report";
 import { sky, SKY_LABEL } from "./weather";
-import { ChevronLeft, ChevronRight, Download, Pill, Sparkles } from "./icons";
+import { ChevronLeft, ChevronRight, Doc, Download, Pill, Sparkles } from "./icons";
 import { STATUS_META } from "./EntryCard";
 import { haptic } from "./haptics";
 
-const isDrop = (e: Entry) => !!e.weather && ((e.weather.d3h ?? 0) <= -1.5 || (e.weather.d24h ?? 0) <= -5);
+const isDrop = (e: Entry) => isDropW(e.weather);
 
 export function StatsSheet({
   open,
@@ -33,11 +35,18 @@ export function StatsSheet({
   });
   const [dir, setDir] = useState(1);
   const [sel, setSel] = useState<string | null>(null);
+  const [midasOpen, setMidasOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const all = entries;
+  const fc = useForecast(all);
+  const headaches = useMemo(() => all.filter((e) => kindOf(e) === "headache"), [all]);
+  const clearDays = useMemo(() => new Set(all.filter((e) => kindOf(e) === "clear").map((e) => dayKey(e.startedAt))), [all]);
+  const midas = useMemo(() => all.filter((e) => kindOf(e) === "midas" && e.midas).sort((a, b) => b.startedAt - a.startedAt), [all]);
   const [insight, setInsight] = useState<{ state: "idle" | "loading" | "done" | "error"; text: string }>({ state: "idle", text: "" });
 
   const m = new Date(month);
   const next = new Date(m.getFullYear(), m.getMonth() + 1, 1).getTime();
-  const inMonth = useMemo(() => entries.filter((e) => e.startedAt >= month && e.startedAt < next), [entries, month, next]);
+  const inMonth = useMemo(() => headaches.filter((e) => e.startedAt >= month && e.startedAt < next), [headaches, month, next]);
 
   const stats = useMemo(() => {
     const byDay = new Map<string, Entry[]>();
@@ -55,6 +64,8 @@ export function StatsSheet({
       if (isDrop(e)) bump("気圧低下");
       e.triggers.forEach(bump);
     });
+    const prodromes = new Map<string, number>();
+    inMonth.forEach((e) => (e.prodromes ?? []).forEach((k) => prodromes.set(k, (prodromes.get(k) ?? 0) + 1)));
     const meds = new Map<string, { n: number; good: number; rated: number }>();
     inMonth.forEach((e) =>
       e.meds.forEach((name) => {
@@ -79,6 +90,7 @@ export function StatsSheet({
       factors: [...factors.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
       meds: [...meds.entries()].sort((a, b) => b[1].n - a[1].n),
       hours,
+      prodromes: [...prodromes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
     };
   }, [inMonth]);
 
@@ -184,7 +196,7 @@ export function StatsSheet({
                   <motion.button
                     key={k}
                     type="button"
-                    className={`cal-day ${k === today ? "today" : ""} ${sel === k ? "sel" : ""} ${list ? "has" : ""}`}
+                    className={`cal-day ${k === today ? "today" : ""} ${sel === k ? "sel" : ""} ${list ? "has" : ""} ${!list && clearDays.has(k) ? "clear" : ""}`}
                     style={{ ["--c" as any]: max >= 0 ? INTENSITY_COLOR[max] : undefined }}
                     data-testid={`day-${k}`}
                     onClick={() => {
@@ -243,6 +255,12 @@ export function StatsSheet({
           </Block>
         )}
 
+        {stats.prodromes.length > 0 && (
+          <Block title="前ぶれ">
+            <Bars rows={stats.prodromes.map(([k, n]) => ({ k, n }))} total={inMonth.length} color="var(--indigo)" />
+          </Block>
+        )}
+
         {inMonth.length > 0 && (
           <Block title="時間帯">
             <Bars rows={["朝", "昼", "夜", "深夜"].map((k, i) => ({ k, n: stats.hours[i] }))} total={inMonth.length} color="var(--blue)" />
@@ -263,6 +281,37 @@ export function StatsSheet({
             </div>
           </Block>
         )}
+
+        {fc && (
+          <Block title="気圧との関係">
+            <p className="plain" data-testid="pressure-relation">{analysisText(fc.analysis)}</p>
+          </Block>
+        )}
+
+        <Block title="生活への支障度">
+          {midas[0] ? (
+            <div className="midas-now" data-testid="midas-latest">
+              <strong>
+                {sum(midas[0].midas!)}
+                <small>点</small>
+              </strong>
+              <div>
+                <b>
+                  グレード{midasGrade(sum(midas[0].midas!)).g}・{midasGrade(sum(midas[0].midas!)).label}
+                </b>
+                <span className="muted">
+                  {fmtDayLong(midas[0].startedAt)}に回答
+                  {midas[1] ? `（前回 ${sum(midas[1].midas!)}点）` : ""}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="plain">過去3か月で、頭痛のために生活にどれくらい支障があったかを5つの質問で点数にします（MIDAS）。受診時の目安になります。</p>
+          )}
+          <motion.button type="button" className="row-btn center small" onClick={() => setMidasOpen(true)} whileTap={{ scale: 0.97 }} data-testid="midas-open">
+            {midas[0] ? "もう一度回答する" : "回答する（約1分）"}
+          </motion.button>
+        </Block>
 
         <Block title="AIの見立て">
           <AnimatePresence mode="wait" initial={false}>
@@ -294,14 +343,22 @@ export function StatsSheet({
           </motion.button>
         </Block>
 
-        <motion.button type="button" className="row-btn center" onClick={() => exportCsv(entries)} whileTap={{ scale: 0.97 }} data-testid="export">
+        <motion.button type="button" className="row-btn center" onClick={() => setReportOpen(true)} whileTap={{ scale: 0.97 }} data-testid="report-open">
+          <Doc width={16} height={16} />
+          受診用レポート（印刷・PDF）
+        </motion.button>
+        <motion.button type="button" className="row-btn center" onClick={() => exportCsv(headaches)} whileTap={{ scale: 0.97 }} data-testid="export">
           <Download width={16} height={16} />
           頭痛ダイアリーを書き出す（CSV）
         </motion.button>
       </div>
+      <MidasSheet open={midasOpen} onClose={() => setMidasOpen(false)} />
+      <Report open={reportOpen} onClose={() => setReportOpen(false)} month={month} entries={all} analysis={fc?.analysis ?? null} />
     </BottomSheet>
   );
 }
+
+const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
 function Kpi({ label, value, unit, warn, small, testid }: { label: string; value: string | number; unit: string; warn?: boolean; small?: boolean; testid?: string }) {
   return (
@@ -360,7 +417,7 @@ function exportCsv(entries: Entry[]) {
     const x = new Date(ms);
     return `${dayKey(ms)} ${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`;
   };
-  const head = ["開始", "終了", "持続(分)", "状態", "強さ", "薬", "効き目", "寝不足", "きっかけ", "症状", "気圧(hPa)", "3時間変化", "24時間変化", "気温", "湿度", "天気", "場所", "メモ"];
+  const head = ["開始", "終了", "持続(分)", "状態", "強さ", "薬", "効き目", "寝不足", "きっかけ", "症状", "前ぶれ", "気圧(hPa)", "6時間変化(日内変動除く)", "24時間変化", "気温", "湿度", "天気", "場所", "メモ"];
   const rows = [...entries]
     .sort((a, b) => a.startedAt - b.startedAt)
     .map((e) => [
@@ -374,8 +431,9 @@ function exportCsv(entries: Entry[]) {
       e.sleepLack ? "あり" : "",
       e.triggers.join("・"),
       e.symptoms.join("・"),
+      (e.prodromes ?? []).join("・"),
       e.weather?.pressure ?? "",
-      e.weather?.d3h ?? "",
+      e.weather?.trend ?? "",
       e.weather?.d24h ?? "",
       e.weather?.temp ?? "",
       e.weather?.humidity ?? "",

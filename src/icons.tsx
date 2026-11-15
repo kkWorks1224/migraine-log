@@ -117,6 +117,30 @@ export const Download = (p: P) => (
     <path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" />
   </svg>
 );
+// 前ぶれ（電波のように広がる弧）
+export const Signal = (p: P) => (
+  <svg {...base(p)} strokeWidth={2.2}>
+    <circle cx="6" cy="18" r="1.6" fill="currentColor" stroke="none" />
+    <path d="M6 12.5a5.5 5.5 0 0 1 5.5 5.5M6 7a11 11 0 0 1 11 11" />
+  </svg>
+);
+export const Bell = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15ZM10 21h4" />
+  </svg>
+);
+export const Doc = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+    <path d="M14 3v5h5M9.5 13h6M9.5 17h6" />
+  </svg>
+);
+export const Mic = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+  </svg>
+);
 export const Drop = (p: P) => (
   <svg {...base(p)} fill="currentColor" stroke="none">
     <path d="M12 2.8c.3 0 .5.1.7.4 2.2 3 6 7.7 6 11.3a6.7 6.7 0 0 1-13.4 0c0-3.6 3.8-8.3 6-11.3.2-.3.4-.4.7-.4Z" />
