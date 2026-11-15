@@ -1,22 +1,41 @@
 // アプリシェルをキャッシュして「開いた瞬間」に表示する（API は常にネットワーク）
-const CACHE = "ml-shell-v3";
+const CACHE = "ml-shell-v4";
+// ハッシュ付きアセットは版をまたいで残す（デプロイ直後、古い画面が古いアセットを読みに来ても表示できるように）
+const ASSETS = "ml-assets";
+const KEEP_ASSETS = 40;
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/"])).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches
+      .keys()
+      .then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== ASSETS).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
   );
 });
+async function putAsset(req, res) {
+  const c = await caches.open(ASSETS);
+  await c.put(req, res);
+  const keys = await c.keys();
+  // 古いものから捨てる
+  await Promise.all(keys.slice(0, Math.max(0, keys.length - KEEP_ASSETS)).map((k) => c.delete(k)));
+}
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
   if (url.pathname.startsWith("/assets/")) {
-    // ハッシュ付きアセットはキャッシュ優先
+    // キャッシュ優先。正常な JS/CSS だけを保存する（存在しないアセットへの HTML 応答は保存しない）
     e.respondWith(
       caches.match(e.request).then(
-        (hit) => hit || fetch(e.request).then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return res; }),
+        (hit) =>
+          hit ||
+          fetch(e.request).then((res) => {
+            const type = res.headers.get("content-type") || "";
+            if (res.ok && !type.includes("text/html")) e.waitUntil(putAsset(e.request, res.clone()));
+            return res;
+          }),
       ),
     );
     return;
