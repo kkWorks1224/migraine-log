@@ -155,7 +155,7 @@ input, textarea { font: inherit; color: inherit; }
 .int-label { position: relative; }
 
 /* 気圧カード */
-.pressure { margin-top: 14px; border-radius: 26px; padding: 16px 16px 10px; background: rgba(255, 255, 255, 0.62); min-height: 72px; }
+.pressure { margin-top: 14px; border-radius: 26px; padding: 16px 16px 10px; background: rgba(255, 255, 255, 0.62); min-height: 64px; box-sizing: border-box; }
 .pc-top { display: flex; justify-content: space-between; align-items: flex-start; }
 .pc-now { display: flex; flex-direction: column; }
 .pc-label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink2); font-weight: 500; }
@@ -177,21 +177,21 @@ input, textarea { font: inherit; color: inherit; }
 .pc-axis { font-size: 9.5px; fill: var(--ink3); font-weight: 500; }
 .pc-pulse { fill: rgba(0, 122, 255, 0.25); transform-box: fill-box; transform-origin: center; animation: ping 2s ease-out infinite; }
 @keyframes ping { 0% { transform: scale(0.6); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
-.pc-msg { display: flex; align-items: center; gap: 8px; margin: 10px 2px 14px; font-size: 14px; color: var(--ink2); }
+.pc-msg { display: flex; align-items: center; gap: 8px; margin: 4px 2px 8px; font-size: 14px; color: var(--ink2); }
 .pc-ask { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px; margin-bottom: 6px; border-radius: 16px; background: rgba(0, 122, 255, 0.08); color: var(--blue); font-size: 16px; font-weight: 600; }
 .pc-sk { padding-bottom: 8px; }
 
 /* セグメンテッドコントロール */
 .seg { display: grid; padding: 4px; border-radius: 24px; margin: 16px 0 14px; }
-.seg-item { position: relative; height: 40px; border-radius: 20px; font-size: 15px; font-weight: 500; color: var(--ink2); transition: color 0.25s; }
+.seg-item { position: relative; height: 40px; border-radius: 20px; font-size: 14px; min-width: 0; white-space: nowrap; font-weight: 500; color: var(--ink2); transition: color 0.25s; }
 .seg-item.on { color: var(--ink); font-weight: 600; }
 .seg-pill { position: absolute; inset: 0; border-radius: 20px; background: #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.04); }
-.seg-label { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.seg-label { position: relative; display: inline-flex; align-items: center; gap: 5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
 .dot.pain { background: var(--red); }
 .dot.easing { background: var(--orange); }
 .dot.gone { background: var(--green); }
-.count { font-weight: 600; font-size: 13px; min-width: 18px; padding: 1px 6px; border-radius: 10px; background: rgba(120, 120, 128, 0.12); color: var(--ink2); display: inline-block; font-variant-numeric: tabular-nums; }
+.count { font-weight: 600; font-size: 12px; min-width: 10px; padding: 1px 6px; border-radius: 10px; background: rgba(120, 120, 128, 0.12); color: var(--ink2); display: inline-block; font-variant-numeric: tabular-nums; }
 .seg-item.on .count { background: rgba(0, 122, 255, 0.12); color: var(--blue); }
 
 /* リスト */

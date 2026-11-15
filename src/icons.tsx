@@ -59,8 +59,11 @@ export const Bolt = (p: P) => (
 );
 export const Pill = (p: P) => (
   <svg {...base(p)}>
-    <rect x="2.8" y="8.2" width="18.4" height="7.6" rx="3.8" transform="rotate(-40 12 12)" />
-    <path d="m9.5 9 5 5.9" />
+    <g transform="rotate(45 12 12)">
+      <rect x="7.5" y="2.5" width="9" height="19" rx="4.5" />
+      <path d="M7.5 12h9" />
+      <path d="M8.2 12.6h7.6v4.4a3.8 3.8 0 0 1-7.6 0Z" fill="currentColor" stroke="none" />
+    </g>
   </svg>
 );
 export const Moon = (p: P) => (

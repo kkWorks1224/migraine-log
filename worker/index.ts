@@ -504,15 +504,33 @@ app.post("/api/ai/insight", async (c) => {
       .join(" ");
   });
 
+  // 数値の事実はサーバで計算して渡し、AI には根拠のある傾向だけを書かせる
+  const day = (ms: number) => new Date(ms + offset * 6e4).toISOString().slice(0, 10);
+  const recent = entries.filter((e) => e.startedAt > Date.now() - 30 * 864e5);
+  const medDays30 = new Set(recent.filter((e) => e.meds.length).map((e) => day(e.startedAt))).size;
+  const withW = entries.filter((e) => e.weather && e.weather.d3h != null);
+  const drops = withW.filter((e) => (e.weather!.d3h ?? 0) <= -1.5 || (e.weather!.d24h ?? 0) <= -5).length;
+  const facts = [
+    `記録件数: ${entries.length}件（直近90日）`,
+    `頭痛のあった日数: ${new Set(entries.map((e) => day(e.startedAt))).size}日`,
+    `直近30日の服薬日数: ${medDays30}日（${medDays30 >= 10 ? "10日以上：薬の使いすぎに注意が必要" : "10日未満：薬の使いすぎには該当しない"}）`,
+    `寝不足の記録: ${entries.filter((e) => e.sleepLack).length}件`,
+    `気圧の変化が分かる記録: ${withW.length}件、そのうち気圧が急に下がっていた記録: ${drops}件`,
+  ];
+
   const system = [
     "あなたは頭痛ダイアリーを読み解くアシスタントです。診断や処方はしません。",
-    "記録から読み取れる傾向（曜日・時間帯、気圧の低下や変化、寝不足、誘因、薬の効き方と服薬日数）を、具体的な数字を添えて日本語で簡潔にまとめてください。",
-    "月に 10 日以上の鎮痛薬・トリプタンの服用が見られる場合は、薬の使いすぎによる頭痛の可能性を医師に相談するよう一言添えること。",
-    "見出しは付けず、「・」で始まる箇条書き 3〜5 行、各 60 文字以内。記録に無いことは書かない。",
+    "【事実】と【記録】だけを根拠に、読み取れる傾向（時間帯・曜日、寝不足、きっかけ、症状、薬の効き方、気圧の変化）を日本語で簡潔にまとめてください。",
+    "根拠となる件数や割合を必ず添えること。根拠が 1〜2 件しかない傾向や、記録に無いことは書かない。",
+    "気圧について書くのは【事実】の「気圧が急に下がっていた記録」が 2 件以上ある場合だけ。",
+    "薬の使いすぎに触れるのは【事実】で「10日以上」となっている場合だけ（その場合は医師への相談を勧める）。",
+    "記録件数が少なく傾向が言えない場合は、その旨と、続けて記録すると分かることを 1 行で書く。",
+    "見出しは付けず、「・」で始まる箇条書き 2〜5 行、各 60 文字以内。",
   ].join("\n");
+  const prompt = `【事実】\n${facts.join("\n")}\n\n【記録】\n${lines.join("\n")}`;
 
   try {
-    const raw = await runAI(c.env, system, lines.join("\n"), 700);
+    const raw = await runAI(c.env, system, prompt, 700);
     const text = raw
       .split("\n")
       .map((s) => s.trim())

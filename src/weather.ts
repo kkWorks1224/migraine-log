@@ -39,7 +39,19 @@ export const useWeather = () =>
     () => state,
   );
 
+// 開発時のみ：localStorage の ml.mockGeo に {"lat":..,"lon":..} を入れると位置情報を差し替える（ブラウザ自動テスト用）
+const mockGeo: { lat: number; lon: number } | null = import.meta.env.DEV
+  ? (() => {
+      try {
+        return JSON.parse(localStorage.getItem("ml.mockGeo") || "null");
+      } catch {
+        return null;
+      }
+    })()
+  : null;
+
 export async function checkPermission() {
+  if (mockGeo) return set({ geo: "granted" });
   if (!("geolocation" in navigator)) return set({ geo: "unsupported" });
   try {
     const p = await navigator.permissions.query({ name: "geolocation" as PermissionName });
@@ -51,6 +63,7 @@ export async function checkPermission() {
 }
 
 function position(): Promise<{ lat: number; lon: number }> {
+  if (mockGeo) return Promise.resolve(mockGeo);
   return new Promise((resolve, reject) =>
     navigator.geolocation.getCurrentPosition(
       (p) => {

@@ -121,7 +121,11 @@ export function Composer({
     form.addEventListener("submit", (e) => e.preventDefault());
     onInput();
     if (document.activeElement !== el && !/iP(hone|ad|od)|Android/.test(navigator.userAgent)) el.focus({ preventScroll: true });
+    // ウィンドウが非アクティブだと focus イベントが来ないため、実際のフォーカス状態を直接反映する
+    setFocused(form.contains(document.activeElement));
+    const recheck = window.setTimeout(() => setFocused(form.contains(document.activeElement)), 400);
     return () => {
+      clearTimeout(recheck);
       el.removeEventListener("input", onInput);
       el.removeEventListener("keydown", onKey);
       form.removeEventListener("focusin", onIn);
