@@ -12,6 +12,7 @@ type Env = {
   DEV_LOGIN?: string;
   AI_LIMITER?: RateLimit;
   WEATHER_LIMITER?: RateLimit;
+  SYNC_LIMITER?: RateLimit;
 };
 type User = { id: string; email: string; name: string; picture: string };
 type Vars = { user: User };
@@ -27,8 +28,23 @@ const baseHeaders = secureHeaders({
     contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
     strictTransportSecurity: "max-age=31536000; includeSubDomains",
     referrerPolicy: "strict-origin-when-cross-origin",
+    xFrameOptions: "DENY",
 });
 app.use("*", (c, next) => (c.req.path === "/auth/callback" ? next() : baseHeaders(c, next)));
+
+// 状態を変える POST は自オリジンからのみ受け付ける（SameSite Cookie に加えた CSRF 対策）
+// 本文は 5MB まで（同期 500 件 × メモ 4000 字が収まる上限）
+const MAX_BODY = 5 * 1024 * 1024;
+app.use("*", async (c, next) => {
+  if (c.req.method === "GET" || c.req.method === "HEAD") return next();
+  const self = new URL(c.req.url).origin;
+  const origin = c.req.header("origin");
+  const site = c.req.header("sec-fetch-site");
+  if (origin ? origin !== self : site && site !== "same-origin") return c.json({ error: "forbidden" }, 403);
+  const len = Number(c.req.header("content-length") ?? 0);
+  if (len > MAX_BODY) return c.json({ error: "too_large" }, 413);
+  return next();
+});
 
 app.onError((err, c) => {
   if (err instanceof SyntaxError) return c.json({ error: "bad_request" }, 400);
@@ -100,6 +116,14 @@ const b64urlDecode = (s: string) =>
   );
 
 async function verifyIdToken(token: string, clientId: string, nonce: string) {
+  try {
+    return await verifyIdTokenUnsafe(token, clientId, nonce);
+  } catch {
+    return null; // 壊れたトークン（base64・JSON 不正など）は検証失敗として扱う
+  }
+}
+async function verifyIdTokenUnsafe(token: string, clientId: string, nonce: string) {
+  if (token.length > 8192) return null;
   const [h, p, sig] = token.split(".");
   if (!h || !p || !sig) return null;
   const header = JSON.parse(new TextDecoder().decode(b64urlDecode(h)));
@@ -273,8 +297,10 @@ async function metNo(lat: number, lon: number): Promise<Hourly | null> {
   }
 }
 
-async function placeName(lat: number, lon: number): Promise<string | null> {
+async function placeName(env: Env, lat: number, lon: number): Promise<string | null> {
   return cached(`place/${lat}/${lon}`, 30 * 86400, async () => {
+    // Nominatim の利用規約（アプリ全体で毎秒 1 回まで）を守るため、全利用者共通のキーで 60 回/分に制限
+    if (env.WEATHER_LIMITER && !(await env.WEATHER_LIMITER.limit({ key: "nominatim:global" })).success) return null;
     try {
       const r = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&accept-language=ja`,
@@ -307,7 +333,7 @@ app.get("/api/weather", async (c) => {
     cached(`om/${lat}/${lon}/${past}/${hour}`, 3600, () => openMeteo(lat, lon, past)).then(
       (h) => h ?? cached(`met/${lat}/${lon}/${hour}`, 3600, () => metNo(lat, lon)),
     ),
-    placeName(lat, lon),
+    placeName(c.env, lat, lon),
   ]);
   if (!hourly) return c.json({ error: "weather_unavailable" }, 502);
   return c.json({ lat, lon, place, hourly }, 200, { "cache-control": "private, max-age=600" });
@@ -328,7 +354,7 @@ app.use("/api/*", async (c, next) => {
 
 const strList = (v: unknown, max = 20, len = 40) =>
   Array.isArray(v)
-    ? [...new Set(v.filter((s): s is string => typeof s === "string").map((s) => s.trim().slice(0, len)).filter(Boolean))].slice(0, max)
+    ? [...new Set(v.slice(0, 100).filter((s): s is string => typeof s === "string").map((s) => s.trim().slice(0, len)).filter(Boolean))].slice(0, max)
     : [];
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -374,6 +400,9 @@ function sanitize(e: any): Entry | null {
 // 差分同期：updatedAt の後勝ちでマージし、since 以降にサーバで変わった行を返す
 app.post("/api/sync", async (c) => {
   const user = c.get("user");
+  if (c.env.SYNC_LIMITER && !(await c.env.SYNC_LIMITER.limit({ key: user.id })).success) {
+    return c.json({ error: "rate_limited" }, 429);
+  }
   const body = await c.req.json<{ since?: number; changes?: unknown[] }>();
   const since = Number(body.since) || 0;
   const changes = (Array.isArray(body.changes) ? body.changes : [])

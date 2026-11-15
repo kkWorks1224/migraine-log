@@ -100,6 +100,12 @@ export const actions = {
   },
   async logout() {
     await fetch("/auth/logout", { method: "POST" }).catch(() => {});
+    // 共用端末に記録や下書きを残さない
+    try {
+      ["ml.draft", "ml.draft.detail"].forEach((k) => localStorage.removeItem(k));
+    } catch {}
+    const memo = document.getElementById("memo") as HTMLTextAreaElement | null;
+    if (memo) memo.value = "";
     emit({ entries: {}, dirty: [], since: 0, user: null });
   },
 };
