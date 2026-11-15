@@ -96,6 +96,10 @@ npm run deploy
 - 認証: Google OpenID Connect（ID トークンを JWKS で RS256 署名検証、iss・aud・exp・nonce・state を検証）。セッショントークンは SHA-256 ハッシュのみ D1 に保存、Cookie は HttpOnly / Secure / SameSite=Lax
 - 認可: 記録の主キーは `(user_id, id)` で、他ユーザーの行は読み書き不可。受信データはサーバ側で検証・正規化（未知のキーは破棄）
 - ヘッダー: CSP（インラインスクリプトはハッシュ許可のみ）、frame-ancestors 'none'、HSTS、nosniff、Permissions-Policy で位置情報は自オリジンのみ
+- CSRF: SameSite=Lax Cookie に加え、状態を変える POST は Origin / Sec-Fetch-Site が自オリジンのときのみ受け付ける
+- 濫用対策: 本文 5MB 上限、配列入力の件数上限、同期は 1 ユーザー 120 回/分、地名取得（Nominatim）はアプリ全体で 60 回/分
+- ログアウト時に端末の記録と下書きを消去（共用端末対策）
+- CI はリポジトリ読み取り権限のみ
 - `/auth/dev` は `DEV_LOGIN=1` かつ localhost のときのみ有効
 
 ※ 本アプリは記録と傾向把握のための道具であり、診断や治療の判断は医師に相談してください。
