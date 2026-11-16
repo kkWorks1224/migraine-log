@@ -91,7 +91,7 @@ export function Report({
             <header>
               <h1>頭痛ダイアリー {m.getFullYear()}年{m.getMonth() + 1}月</h1>
               <p>
-                作成日 {dayKey(Date.now()).replace(/-/g, "/")}・頭痛ログ
+                作成日 {dayKey(Date.now()).replace(/-/g, "/")}・頭上注意
               </p>
             </header>
 

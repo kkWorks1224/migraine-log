@@ -678,7 +678,7 @@ app.post("/api/push/test", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ?1").bind(user.id).all<PushSub>();
   let sent = 0;
   for (const s of results) {
-    const st = await sendPush(s, { title: "頭痛ログ", body: "通知は届いています。気圧が下がりそうなときにお知らせします。", tag: "test" }, v, 600);
+    const st = await sendPush(s, { title: "頭上注意", body: "通知は届いています。気圧が下がりそうなときにお知らせします。", tag: "test" }, v, 600);
     if (st === 404 || st === 410) await c.env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ?1").bind(s.endpoint).run();
     else if (st < 300) sent++;
   }

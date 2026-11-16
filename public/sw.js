@@ -1,5 +1,5 @@
 // アプリシェルをキャッシュして「開いた瞬間」に表示する（API は常にネットワーク）
-const CACHE = "ml-shell-v4";
+const CACHE = "ml-shell-v5";
 // ハッシュ付きアセットは版をまたいで残す（デプロイ直後、古い画面が古いアセットを読みに来ても表示できるように）
 const ASSETS = "ml-assets";
 const KEEP_ASSETS = 40;
@@ -57,7 +57,7 @@ self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (_) {}
   e.waitUntil(
-    self.registration.showNotification(d.title || "頭痛ログ", {
+    self.registration.showNotification(d.title || "頭上注意", {
       body: d.body || "",
       tag: d.tag || "pressure",
       icon: "/icon-512.png",

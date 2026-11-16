@@ -563,7 +563,7 @@ function ShortcutSection() {
               <li>「URLエンコード」を追加（入力は音声入力のテキスト）</li>
               <li>「URL」を追加し、下のアドレスの後ろにエンコード結果を入れる</li>
               <li>「URLを開く」を追加</li>
-              <li>名前を「頭痛ログ」にする →「Hey Siri、頭痛ログ」で話すだけで記録</li>
+              <li>名前を「頭上注意」にする →「Hey Siri、頭上注意」で話すだけで記録</li>
             </ol>
             <button
               type="button"
