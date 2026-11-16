@@ -386,7 +386,7 @@ function sanitize(e: any): Entry | null {
   if (!STATUSES.includes(e.status)) return null;
   if (![e.startedAt, e.createdAt, e.updatedAt].every(Number.isFinite)) return null;
   const w = e.weather;
-  const kind = ["clear", "midas"].includes(e.kind) ? (e.kind as "clear" | "midas") : undefined;
+  const kind = ["clear", "midas", "workout"].includes(e.kind) ? (e.kind as "clear" | "midas" | "workout") : undefined;
   return {
     id: e.id,
     ...(kind ? { kind } : {}),

@@ -8,7 +8,9 @@ import { analysisText, useForecast } from "./useForecast";
 import { MidasSheet } from "./Midas";
 import { Report } from "./Report";
 import { sky, SKY_LABEL } from "./weather";
-import { ChevronLeft, ChevronRight, Doc, Download, Pill, Sparkles } from "./icons";
+import { ChevronLeft, ChevronRight, Doc, Download, Dumbbell, Pill, Sparkles } from "./icons";
+import { workoutRelation, workoutText } from "./workout";
+import { actions } from "./store";
 import { STATUS_META } from "./EntryCard";
 import { haptic } from "./haptics";
 
@@ -41,6 +43,8 @@ export function StatsSheet({
   const fc = useForecast(all);
   const headaches = useMemo(() => all.filter((e) => kindOf(e) === "headache"), [all]);
   const clearDays = useMemo(() => new Set(all.filter((e) => kindOf(e) === "clear").map((e) => dayKey(e.startedAt))), [all]);
+  const workouts = useMemo(() => new Map(all.filter((e) => kindOf(e) === "workout").map((e) => [dayKey(e.startedAt), e] as const)), [all]);
+  const woRel = useMemo(() => workoutRelation(all), [all]);
   const midas = useMemo(() => all.filter((e) => kindOf(e) === "midas" && e.midas).sort((a, b) => b.startedAt - a.startedAt), [all]);
   const [insight, setInsight] = useState<{ state: "idle" | "loading" | "done" | "error"; text: string }>({ state: "idle", text: "" });
 
@@ -211,6 +215,7 @@ export function StatsSheet({
                     <span className="n">{i + 1}</span>
                     {list && <i className="cal-dot" />}
                     {med && <i className="cal-med" />}
+                    {workouts.has(k) && <Dumbbell className="cal-wo" width={11} height={11} />}
                   </motion.button>
                 );
               })}
@@ -228,8 +233,29 @@ export function StatsSheet({
               exit={{ opacity: 0, height: 0 }}
               transition={spring}
             >
+              {sel <= today && (
+                <motion.button
+                  type="button"
+                  className={`wo-toggle ${workouts.has(sel) ? "on" : ""}`}
+                  aria-pressed={workouts.has(sel)}
+                  data-testid="workout-toggle"
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => {
+                    const w = workouts.get(sel);
+                    if (w) all.filter((e) => kindOf(e) === "workout" && dayKey(e.startedAt) === sel).forEach((e) => actions.remove(e.id));
+                    else {
+                      const [y, mo, d] = sel.split("-").map(Number);
+                      actions.markWorkout(new Date(y, mo - 1, d).getTime());
+                    }
+                    haptic(w ? "light" : "success");
+                  }}
+                >
+                  <Dumbbell width={16} height={16} />
+                  {workouts.has(sel) ? "筋トレした（記録済み）" : "この日に筋トレした"}
+                </motion.button>
+              )}
               {selEntries.length === 0 ? (
-                <p className="muted">記録なし</p>
+                <p className="muted">頭痛の記録なし</p>
               ) : (
                 selEntries.map((e) => (
                   <button key={e.id} type="button" className="day-item" onClick={() => onOpenEntry(e)}>
@@ -287,6 +313,13 @@ export function StatsSheet({
             <p className="plain" data-testid="pressure-relation">{analysisText(fc.analysis)}</p>
           </Block>
         )}
+
+        <Block title="筋トレとの関係">
+          <p className="plain" data-testid="workout-relation">
+            {woRel ? workoutText(woRel) : "筋トレした日を記録すると、翌日に頭痛が出やすいかを調べます。今日の分はホームの「今日は筋トレした」、前の日はカレンダーの日付をタップして付けられます。"}
+          </p>
+          {woRel && woRel.after >= 3 && <small className="muted">頭痛の記録がない日は「頭痛なし」として数えています</small>}
+        </Block>
 
         <Block title="生活への支障度">
           {midas[0] ? (

@@ -210,3 +210,9 @@ export const GoogleG = (p: P) => (
     <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.8l-8 6.1C6.6 42.6 14.6 48 24 48z" />
   </svg>
 );
+
+export const Dumbbell = (p: P) => (
+  <svg {...base(p)} strokeWidth={2.4}>
+    <path d="M8 12h8M5 8v8M8 6.5v11M16 6.5v11M19 8v8M3 12h2M19 12h2" />
+  </svg>
+);

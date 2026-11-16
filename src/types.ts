@@ -20,7 +20,7 @@ export type Weather = {
 export type MedEffect = "good" | "some" | "none";
 
 // headache = 頭痛の記録 / clear = 頭痛のなかった日 / midas = 生活への支障度の回答
-export type Kind = "headache" | "clear" | "midas";
+export type Kind = "headache" | "clear" | "midas" | "workout";
 export const kindOf = (e: { kind?: Kind }): Kind => e.kind ?? "headache";
 
 export type Entry = {
@@ -59,7 +59,7 @@ export const TRIGGERS = [
   "運動",
 ];
 
-export const SYMPTOMS = ["前兆", "吐き気", "光がつらい", "音がつらい", "ズキズキ", "片側", "動くと悪化", "めまい"];
+export const SYMPTOMS = ["前兆", "吐き気", "光がつらい", "音がつらい", "ズキズキ", "片側", "動くと悪化", "めまい", "押すと痛い"];
 
 // 頭痛の数時間〜1日前に出やすい前ぶれ（予兆期）
 export const PRODROMES = ["あくび", "首・肩のこり", "眠気", "甘いものが欲しい", "イライラ", "だるさ", "集中しにくい", "むくみ"];

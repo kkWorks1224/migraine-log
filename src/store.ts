@@ -103,6 +103,12 @@ export const actions = {
     const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
     return actions.add({ ...blankDraft(), kind: "clear", status: "gone", startedAt: noon, endedAt: noon });
   },
+  // 筋トレした日（後日入力もできるよう日付で受け取り、正午を代表時刻にする）
+  markWorkout(day: number) {
+    const d = new Date(day);
+    const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
+    return actions.add({ ...blankDraft(), kind: "workout", status: "gone", startedAt: noon, endedAt: noon });
+  },
   addMidas(answers: number[]) {
     const now = Date.now();
     return actions.add({ ...blankDraft(), kind: "midas", status: "gone", midas: answers, startedAt: now, endedAt: now });

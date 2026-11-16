@@ -504,3 +504,15 @@ input, textarea { font: inherit; color: inherit; }
 .wk-alert { font-size: 10px; font-weight: 700; min-height: 13px; color: #c25e00; white-space: nowrap; }
 .wk.high .wk-alert { color: #c0271d; }
 .wk-note { margin: 6px 6px 0; font-size: 11px; line-height: 1.5; color: var(--ink3); }
+
+/* 筋トレした日 */
+.day-marks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.clear-btn.wo .clear-check { background: var(--orange); }
+.clear-btn.wo.done { background: rgba(255, 149, 0, 0.13); color: #b25f00; }
+.cal-wo { position: absolute; top: 0; right: 2px; z-index: 2; color: #e07800; background: #fff; border-radius: 50%; padding: 1px; box-sizing: content-box; }
+.wo-toggle { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 40px; padding: 0 14px; border-radius: 20px; background: var(--fill); font-size: 14px; font-weight: 600; color: var(--ink); }
+.wo-toggle.on { background: rgba(255, 149, 0, 0.14); color: #b25f00; }
+.day-marks-row { list-style: none; padding: 4px 0 8px; }
+.day-marks { align-items: center; flex-wrap: nowrap; }
+.day-marks-label { font-size: 14px; color: var(--ink2); font-weight: 600; }
+.day-marks .clear-btn { padding: 0 16px 0 10px; }

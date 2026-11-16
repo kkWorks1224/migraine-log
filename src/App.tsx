@@ -13,7 +13,7 @@ import { attachWeather, getGeo, loadSeries, useWeather } from "./weather";
 import { useForecast } from "./useForecast";
 import { disablePush, enablePush, pushSupport, refreshPush, savedPush, testPush } from "./push";
 import { dayKey, fmtDayLong } from "./format";
-import { Bell, Chart, Check, ChevronRight, GoogleG, Mic, Person } from "./icons";
+import { Bell, Chart, Check, ChevronRight, Dumbbell, GoogleG, Mic, Person } from "./icons";
 import { haptic } from "./haptics";
 
 type Toast = { id: number; text: string; undo?: () => void };
@@ -77,6 +77,7 @@ export function App() {
   const todayKey = dayKey(now);
   const todayClear = live.find((e) => kindOf(e) === "clear" && dayKey(e.startedAt) === todayKey);
   const todayPain = headaches.some((e) => dayKey(e.startedAt) === todayKey);
+  const todayWorkout = live.find((e) => kindOf(e) === "workout" && dayKey(e.startedAt) === todayKey);
 
   // 治まった一覧は日付ごとに見出しを入れる
   const rows = useMemo(() => {
@@ -239,17 +240,33 @@ export function App() {
                     >
                       <span className={`empty-dot ${tab}`} />
                       <p>{EMPTY_HINT[tab]}</p>
-                      {tab === "pain" && !todayPain && (
-                        <ClearDayButton
-                          done={!!todayClear}
-                          onMark={() => {
-                            const e = actions.markClear(now);
-                            haptic("success");
-                            showToast({ text: "今日は頭痛なしと記録しました", undo: () => actions.remove(e.id) });
-                          }}
-                          onUnmark={() => todayClear && actions.remove(todayClear.id)}
-                        />
-                      )}
+                    </motion.li>
+                  )}
+                  {tab === "pain" && (
+                    <motion.li key="marks" layout className="day-marks-row" transition={spring}>
+                        <div className="day-marks" role="group" aria-label="今日の記録">
+                          <span className="day-marks-label">今日は</span>
+                          {!todayPain && (
+                            <ClearDayButton
+                              done={!!todayClear}
+                              onMark={() => {
+                                const e = actions.markClear(now);
+                                haptic("success");
+                                showToast({ text: "今日は頭痛なしと記録しました", undo: () => actions.remove(e.id) });
+                              }}
+                              onUnmark={() => todayClear && actions.remove(todayClear.id)}
+                            />
+                          )}
+                          <WorkoutButton
+                            done={!!todayWorkout}
+                            onMark={() => {
+                              const e = actions.markWorkout(now);
+                              haptic("success");
+                              showToast({ text: "今日の筋トレを記録しました", undo: () => actions.remove(e.id) });
+                            }}
+                            onUnmark={() => live.filter((e) => kindOf(e) === "workout" && dayKey(e.startedAt) === todayKey).forEach((e) => actions.remove(e.id))}
+                          />
+                        </div>
                     </motion.li>
                   )}
                 </motion.ul>
@@ -306,7 +323,28 @@ function ClearDayButton({ done, onMark, onUnmark }: { done: boolean; onMark: () 
       <motion.span className="clear-check" initial={false} animate={{ scale: done ? 1 : 0.8, opacity: done ? 1 : 0.5 }} transition={spring}>
         <Check width={14} height={14} />
       </motion.span>
-      {done ? "今日は頭痛なし（記録済み）" : "今日は頭痛なし"}
+      頭痛なし
+    </motion.button>
+  );
+}
+
+// 筋トレした日（前日以前は「まとめ」のカレンダーから付けられる）
+function WorkoutButton({ done, onMark, onUnmark }: { done: boolean; onMark: () => void; onUnmark: () => void }) {
+  return (
+    <motion.button
+      type="button"
+      className={`clear-btn wo ${done ? "done" : ""}`}
+      data-testid="workout-today"
+      aria-pressed={done}
+      onClick={() => (done ? onUnmark() : onMark())}
+      whileTap={{ scale: 0.96 }}
+      layout
+      transition={spring}
+    >
+      <motion.span className="clear-check" initial={false} animate={{ scale: done ? 1 : 0.8, opacity: done ? 1 : 0.5 }} transition={spring}>
+        <Dumbbell width={15} height={15} />
+      </motion.span>
+      筋トレした
     </motion.button>
   );
 }
